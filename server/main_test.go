@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 const pw = "correct horse battery"
@@ -134,5 +135,96 @@ func TestSurvivesRestart(t *testing.T) {
 			do(h, "POST", "/api/upload", export("1700000000000", 10, .04), "u", pw)
 		}
 		s.db.Close()
+	}
+}
+
+func TestOldShortStatsMix(t *testing.T) {
+	a, b := empty(), empty()
+	a.N[5], b.N[5] = 1, 1
+	b.PSD[5] = b.PSD[5][:oldNF]
+	a.PSD[5][30-f0], b.PSD[5][30-f0] = 4, 2
+	if !a.valid() || !b.valid() {
+		t.Fatal("valid")
+	}
+	for _, order := range [][]stats{{a, b}, {b, a}} {
+		x := empty()
+		add(&x, order[0])
+		add(&x, order[1])
+		o := summarise(x, 10, 80, true)
+		if o.PeakHz != 30 || len(o.Spectrum) != oldNF || o.Spectrum["30"] != 1.7321 {
+			t.Fatalf("%d %v", len(o.Spectrum), o.Spectrum["30"])
+		}
+	}
+	if o := summarise(a, 10, 80, true); len(o.Spectrum) != nf || o.BandRMS["120-230"] != 0 {
+		t.Fatal(len(o.Spectrum))
+	}
+}
+
+func TestShares(t *testing.T) {
+	s, h := mk(t)
+	for _, id := range []string{"1700000000000", "1700001000000"} {
+		do(h, "POST", "/api/upload", export(id, 10, .04), "u", pw)
+	}
+	mkShare := func(body string) (int, string) {
+		w := do(h, "POST", "/api/shares", []byte(body), "u", pw)
+		var r struct{ Path string }
+		json.Unmarshal(w.Body.Bytes(), &r)
+		return w.Code, r.Path
+	}
+	if c := do(h, "POST", "/api/shares", []byte(`{}`), "", "").Code; c != 401 {
+		t.Fatal("open create", c)
+	}
+	for _, bad := range []string{`{}`, `{"title":"x","drives":["9999999999999"],"days":5}`, `{"title":"x","drives":["1700000000000"],"days":999}`, `{"title":"x","drives":["1700000000000"],"days":5,"pin":"1"}`} {
+		if c, _ := mkShare(bad); c != 400 {
+			t.Fatal(bad, c)
+		}
+	}
+	_, p := mkShare(`{"title":"Test","drives":["1700000000000"],"days":5}`)
+	if w := do(h, "GET", p, nil, "", ""); w.Code != 200 || strings.Contains(w.Body.String(), "{{NONCE}}") || !strings.Contains(w.Header().Get("Content-Security-Policy"), "default-src 'none'") {
+		t.Fatal(w.Code)
+	}
+	w := do(h, "POST", p+"/data", []byte(`{}`), "", "")
+	b := w.Body.String()
+	if w.Code != 200 || strings.Count(b, `"no":`) != 1 {
+		t.Fatal(w.Code, b[:200])
+	}
+	for _, leak := range []string{"1700000000000", "lat", "Location", "raw", "note", "tyre"} {
+		if strings.Contains(b, leak) {
+			t.Fatal("leaks", leak)
+		}
+	}
+	for _, x := range []string{"/api/drives", "/s/x/../../api/drives", "/s/" + strings.Repeat("a", 43)} {
+		if c := do(h, "GET", x, nil, "", "").Code; c == 200 {
+			t.Fatal(x, c)
+		}
+	}
+	_, q := mkShare(`{"title":"Pin","drives":["1700000000000"],"days":5,"pin":"4821"}`)
+	if c := do(h, "POST", q+"/data", []byte(`{}`), "", "").Code; c != 401 {
+		t.Fatal(c)
+	}
+	if c := do(h, "POST", q+"/data", []byte(`{"pin":"4821"}`), "", "").Code; c != 200 {
+		t.Fatal(c)
+	}
+	for i := 0; i < 10; i++ {
+		do(h, "POST", q+"/data", []byte(`{"pin":"0000"}`), "", "")
+	}
+	if c := do(h, "POST", q+"/data", []byte(`{"pin":"4821"}`), "", "").Code; c != 429 {
+		t.Fatal("pin not limited", c)
+	}
+	s.fails = map[string][]time.Time{}
+	var l struct{ Shares []share }
+	json.Unmarshal(do(h, "GET", "/api/shares", nil, "u", pw).Body.Bytes(), &l)
+	if len(l.Shares) != 2 || !l.Shares[0].HasPin || l.Shares[1].Opens != 1 {
+		t.Fatalf("%+v", l)
+	}
+	if c := do(h, "DELETE", "/api/shares/1", nil, "u", pw).Code; c != 204 {
+		t.Fatal(c)
+	}
+	if c := do(h, "POST", p+"/data", []byte(`{}`), "", "").Code; c != 404 {
+		t.Fatal("cancelled link works", c)
+	}
+	s.db.Exec(`UPDATE shares SET expires=1`)
+	if c := do(h, "POST", q+"/data", []byte(`{"pin":"4821"}`), "", "").Code; c != 404 {
+		t.Fatal("expired link works", c)
 	}
 }

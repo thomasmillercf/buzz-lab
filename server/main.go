@@ -32,7 +32,8 @@ var llms string
 
 const (
 	maxUpload = 300 << 20
-	f0, nf    = 2, 119 // PSD covers 2..120 Hz
+	f0, nf    = 2, 229 // PSD covers 2..230 Hz
+	oldNF     = 119    // app 1.3 and earlier sent 2..120 Hz
 	nb        = 16     // 5 mph bins from 0
 )
 
@@ -79,7 +80,7 @@ func open(dir string) (*sql.DB, error) {
 	db.SetMaxOpenConns(1)
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS cars(id TEXT PRIMARY KEY,name TEXT NOT NULL,tyre TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS drives(id TEXT PRIMARY KEY,car TEXT NOT NULL,start INTEGER NOT NULL,end INTEGER NOT NULL,place TEXT NOT NULL,note TEXT NOT NULL,tyre TEXT NOT NULL,stats TEXT NOT NULL,marks TEXT NOT NULL DEFAULT '',uploaded INTEGER NOT NULL);
-CREATE INDEX IF NOT EXISTS drives_car ON drives(car,start);`)
+CREATE INDEX IF NOT EXISTS drives_car ON drives(car,start);` + shareSchema)
 	return db, err
 }
 
@@ -263,7 +264,7 @@ func (s stats) valid() bool {
 		return false
 	}
 	for b := range s.N {
-		if s.N[b] > 0 && (len(s.PSD[b]) != nf || len(s.Ax[b]) != 3) {
+		if s.N[b] > 0 && ((len(s.PSD[b]) != nf && len(s.PSD[b]) != oldNF) || len(s.Ax[b]) != 3) {
 			return false
 		}
 	}
@@ -308,8 +309,13 @@ func add(a *stats, b stats) {
 		if b.N[i] == 0 {
 			continue
 		}
+		if len(b.PSD[i]) < len(a.PSD[i]) { // keep only the range every drive has
+			for k := range a.PSD {
+				a.PSD[k] = a.PSD[k][:len(b.PSD[i])]
+			}
+		}
 		a.N[i] += b.N[i]
-		for k := range b.PSD[i] {
+		for k := range a.PSD[i] {
 			a.PSD[i][k] += b.PSD[i][k]
 		}
 		for k := range b.Ax[i] {
@@ -341,14 +347,20 @@ func peak(p []float64) int {
 	return k
 }
 func summarise(s stats, lo, hi int, full bool) *summary {
-	p, ax, n := make([]float64, nf), [3]float64{}, 0
+	l := nf
+	for b := range s.N {
+		if s.N[b] > 0 && len(s.PSD[b]) < l {
+			l = len(s.PSD[b])
+		}
+	}
+	p, ax, n := make([]float64, l), [3]float64{}, 0
 	o := &summary{SpeedMph: [2]int{lo, hi}, BandRMS: map[string]float64{}}
 	for b := 0; b < nb; b++ {
 		if b*5 < lo || b*5+5 > hi || s.N[b] == 0 {
 			continue
 		}
 		n += s.N[b]
-		for k, v := range s.PSD[b] {
+		for k, v := range s.PSD[b][:l] {
 			p[k] += v
 		}
 		for k, v := range s.Ax[b] {
@@ -362,7 +374,10 @@ func summarise(s stats, lo, hi int, full bool) *summary {
 		return o
 	}
 	o.SteadySeconds, o.PeakHz = n*2, peak(p)
-	for _, x := range [][2]int{{2, 8}, {8, 20}, {25, 35}, {38, 48}, {50, 80}, {80, 120}} {
+	for _, x := range [][2]int{{2, 8}, {8, 20}, {25, 35}, {38, 48}, {50, 80}, {80, 120}, {120, 230}} {
+		if x[1] > l+f0 {
+			continue
+		}
 		o.BandRMS[fmt.Sprintf("%d-%d", x[0], x[1])] = band(p, float64(n), x[0], x[1])
 	}
 	if t := ax[0] + ax[1] + ax[2]; t > 0 {
@@ -410,7 +425,7 @@ func parse(r *http.Request) (query, error) {
 	return q, nil
 }
 func (s *server) load(q query, id string) ([]drive, error) {
-	rows, err := s.db.Query(`SELECT d.id,d.car,COALESCE(c.name,d.car),d.start,d.end,d.place,d.note,d.tyre,d.stats,d.marks FROM drives d LEFT JOIN cars c ON c.id=d.car
+	rows, err := s.db.Query(`SELECT d.id,d.car,COALESCE(c.name,d.car),d.start,d.end,d.place,d.note,COALESCE(NULLIF(d.tyre,''),c.tyre,''),d.stats,d.marks FROM drives d LEFT JOIN cars c ON c.id=d.car
 WHERE (?='' OR d.id=?) AND (?='' OR d.car=? OR c.name=? COLLATE NOCASE) AND (?='' OR d.place=?) AND d.start BETWEEN ? AND ? ORDER BY d.start DESC`, id, id, q.car, q.car, q.car, q.place, q.place, q.from, q.to)
 	if err != nil {
 		return nil, err
@@ -650,6 +665,9 @@ func (s *server) routes() http.Handler {
 	m.HandleFunc("GET /api/drives/{id}", s.one)
 	m.HandleFunc("GET /api/drives/{id}/raw.zip", s.rawGet)
 	m.HandleFunc("GET /api/drives/{id}/track", s.track)
+	m.HandleFunc("POST /api/shares", s.shareCreate)
+	m.HandleFunc("GET /api/shares", s.shareList)
+	m.HandleFunc("DELETE /api/shares/{id}", s.shareDelete)
 	m.HandleFunc("GET /api/export.zip", s.export)
 	m.HandleFunc("GET /app.apk", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/vnd.android.package-archive")
@@ -658,7 +676,17 @@ func (s *server) routes() http.Handler {
 	})
 	m.HandleFunc("DELETE /api/drives/{id}", s.del)
 	m.HandleFunc("GET /api/average", s.average)
-	return s.auth(m)
+	pub := http.NewServeMux() // reachable without the login, only by its random key
+	pub.HandleFunc("GET /s/{token}", s.shareView)
+	pub.HandleFunc("POST /s/{token}/data", s.shareData)
+	private := s.auth(m)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/s/") {
+			pub.ServeHTTP(w, r)
+			return
+		}
+		private.ServeHTTP(w, r)
+	})
 }
 
 func newServer(dir, user, pass string) (*server, error) {

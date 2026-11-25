@@ -8,6 +8,9 @@ GET /api/average?car=Hatchback           every matching drive of one car combine
 GET /api/drives/{id}/raw.zip       raw readings in phyphox CSV layout, when they were uploaded
 GET /api/drives/{id}/track          positions once a second with t in seconds from the first reading, empty when sent without them
 POST /api/upload                   body is an app export zip. Sending a drive again replaces it
+POST /api/shares                    {title, drives:[ids], days, pin?} makes a read-only public link; the key is returned once
+GET /api/shares                     links, and how often each was opened
+DELETE /api/shares/{id}             cancels a link
 GET /api/export.zip                everything: the SQLite database and all raw uploads
 DELETE /api/drives/{id}            removes a drive and its raw readings
 

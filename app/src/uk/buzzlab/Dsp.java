@@ -2,12 +2,12 @@ package uk.buzzlab;
 import org.json.*; import java.io.*; import java.util.*;
 /** Vibration by speed. Sums are stored, so drives combine exactly. Method matches analyse.py: steady 2 s windows, 1 s Hann segments. */
 final class Dsp {
-  static final int F0=2,F1=120,NF=F1-F0+1,NB=16; static final double MPH=2.23694;
+  static final int F0=2,F1=230,NF=F1-F0+1,NB=16; static final double MPH=2.23694;
   final double[][] psd=new double[NB][NF]; final double[][] ax=new double[NB][3]; final int[] n=new int[NB]; double maxMph,km; 
   static int bin(double mph){ return mph<0?-1:(int)(mph/5)<NB?(int)(mph/5):-1; }
   void add(Dsp o){ for(int b=0;b<NB;b++){ n[b]+=o.n[b]; for(int f=0;f<NF;f++)psd[b][f]+=o.psd[b][f]; for(int a=0;a<3;a++)ax[b][a]+=o.ax[b][a]; } maxMph=Math.max(maxMph,o.maxMph); km+=o.km; }
-  JSONObject json() throws JSONException { JSONObject o=new JSONObject(); JSONArray N=new JSONArray(),P=new JSONArray(),A=new JSONArray(); for(int b=0;b<NB;b++){ N.put(n[b]); JSONArray p=new JSONArray(),q=new JSONArray(); if(n[b]>0){ for(double v:psd[b])p.put((double)(float)v); for(double v:ax[b])q.put((double)(float)v);} P.put(p);A.put(q);} return o.put("v",1).put("n",N).put("psd",P).put("ax",A).put("maxMph",maxMph).put("km",km); }
-  static Dsp from(JSONObject o) throws JSONException { Dsp d=new Dsp(); for(int b=0;b<NB;b++){ d.n[b]=o.getJSONArray("n").getInt(b); JSONArray p=o.getJSONArray("psd").getJSONArray(b),q=o.getJSONArray("ax").getJSONArray(b); for(int f=0;f<p.length();f++)d.psd[b][f]=p.getDouble(f); for(int a=0;a<q.length();a++)d.ax[b][a]=q.getDouble(a);} d.maxMph=o.optDouble("maxMph");d.km=o.optDouble("km"); return d; }
+  JSONObject json() throws JSONException { JSONObject o=new JSONObject(); JSONArray N=new JSONArray(),P=new JSONArray(),A=new JSONArray(); for(int b=0;b<NB;b++){ N.put(n[b]); JSONArray p=new JSONArray(),q=new JSONArray(); if(n[b]>0){ for(double v:psd[b])p.put((double)(float)v); for(double v:ax[b])q.put((double)(float)v);} P.put(p);A.put(q);} return o.put("v",2).put("n",N).put("psd",P).put("ax",A).put("maxMph",maxMph).put("km",km); }
+  static Dsp from(JSONObject o) throws JSONException { Dsp d=new Dsp(); for(int b=0;b<NB;b++){ d.n[b]=o.getJSONArray("n").getInt(b); JSONArray p=o.getJSONArray("psd").getJSONArray(b),q=o.getJSONArray("ax").getJSONArray(b); if(d.n[b]>0&&p.length()!=NF)throw new JSONException("older stats"); for(int f=0;f<p.length();f++)d.psd[b][f]=p.getDouble(f); for(int a=0;a<q.length();a++)d.ax[b][a]=q.getDouble(a);} d.maxMph=o.optDouble("maxMph");d.km=o.optDouble("km"); return d; }
 
   /** acc: t seconds, xyz; gps: t seconds, lat, lon, m/s, accuracy. */
   static Dsp analyse(double[] t,float[][] v,double[][] gps){

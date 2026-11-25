@@ -14,5 +14,8 @@ Set `BUZZ_USER` and `BUZZ_PASS` (16 characters or more), and optionally `BUZZ_DA
 
     cd server && go test ./... && go build -o buzz-backend .
 
+## Share links
+The app can make a read-only web page of chosen drives, with an expiry and an optional PIN. Links are random keys, stored only as hashes. They never show positions, plates, notes or raw readings.
+
 ## Reading results
 A phone resting loosely can add its own resonance. Compare drives only on the same road, phone position and speed. The numbers do not show a cause.
