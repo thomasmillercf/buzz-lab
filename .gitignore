@@ -1,0 +1,13 @@
+.keys/
+out/
+*.env
+*.ks
+*.apk
+*.db*
+data/
+drives/
+*.csv
+*.zip
+.venv/
+__pycache__/
+server/buzz-backend
