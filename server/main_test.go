@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -171,6 +172,14 @@ func TestShares(t *testing.T) {
 		json.Unmarshal(w.Body.Bytes(), &r)
 		return w.Code, r.Path
 	}
+	_, vp := mkShare(`{"title":"V","drives":["1700000000000"],"days":5,"view":{"car":"Hatchback","with":"Van","place":"","lo":30,"hi":50}}`)
+	if b := do(h, "POST", vp+"/data", []byte(`{}`), "", "").Body.String(); !strings.Contains(b, `"view":{"car":"Hatchback","with":"Van","place":"","lo":30,"hi":50}`) {
+		t.Fatal(b[:120])
+	}
+	if c, _ := mkShare(`{"title":"V","drives":["1700000000000"],"days":5,"view":{"lo":50,"hi":30}}`); c != 400 {
+		t.Fatal("bad view", c)
+	}
+	s.db.Exec(`DELETE FROM shares`)
 	if c := do(h, "POST", "/api/shares", []byte(`{}`), "", "").Code; c != 401 {
 		t.Fatal("open create", c)
 	}
@@ -217,7 +226,7 @@ func TestShares(t *testing.T) {
 	if len(l.Shares) != 2 || !l.Shares[0].HasPin || l.Shares[1].Opens != 1 {
 		t.Fatalf("%+v", l)
 	}
-	if c := do(h, "DELETE", "/api/shares/1", nil, "u", pw).Code; c != 204 {
+	if c := do(h, "DELETE", "/api/shares/"+strconv.FormatInt(l.Shares[1].ID, 10), nil, "u", pw).Code; c != 204 {
 		t.Fatal(c)
 	}
 	if c := do(h, "POST", p+"/data", []byte(`{}`), "", "").Code; c != 404 {

@@ -81,7 +81,14 @@ func open(dir string) (*sql.DB, error) {
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS cars(id TEXT PRIMARY KEY,name TEXT NOT NULL,tyre TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS drives(id TEXT PRIMARY KEY,car TEXT NOT NULL,start INTEGER NOT NULL,end INTEGER NOT NULL,place TEXT NOT NULL,note TEXT NOT NULL,tyre TEXT NOT NULL,stats TEXT NOT NULL,marks TEXT NOT NULL DEFAULT '',uploaded INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS drives_car ON drives(car,start);` + shareSchema)
-	return db, err
+	if err != nil {
+		return nil, err
+	}
+	// added after the first release; an existing column is not an error
+	if _, e := db.Exec(`ALTER TABLE shares ADD COLUMN view TEXT NOT NULL DEFAULT ''`); e != nil && !strings.Contains(e.Error(), "duplicate column") {
+		return nil, e
+	}
+	return db, nil
 }
 
 func (s *server) auth(h http.Handler) http.Handler {

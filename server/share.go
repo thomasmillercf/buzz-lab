@@ -33,6 +33,26 @@ type share struct {
 	Opens   int      `json:"opens"`
 	salt    string
 	pin     string
+	view    string
+}
+
+// view is what the sharer was looking at when the link was made.
+type view struct {
+	Car   string `json:"car"`
+	With  string `json:"with"`
+	Place string `json:"place"`
+	Lo    int    `json:"lo"`
+	Hi    int    `json:"hi"`
+}
+
+func (v view) ok() bool {
+	return len(v.Car) <= 80 && len(v.With) <= 80 && len(v.Place) <= 80 && v.Lo >= 0 && v.Hi <= 80 && v.Lo < v.Hi
+}
+func orNull(s string) string {
+	if s == "" {
+		return "null"
+	}
+	return s
 }
 
 func hashToken(t string) string { h := sha256.Sum256([]byte(t)); return hex.EncodeToString(h[:]) }
@@ -55,6 +75,7 @@ func (s *server) shareCreate(w http.ResponseWriter, r *http.Request) {
 		Drives []string `json:"drives"`
 		Days   int      `json:"days"`
 		Pin    string   `json:"pin"`
+		View   *view    `json:"view"`
 	}
 	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&q) != nil {
 		fail(w, 400, "not valid JSON")
@@ -67,6 +88,10 @@ func (s *server) shareCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	if q.Pin != "" && (len(q.Pin) < 4 || len(q.Pin) > 32) {
 		fail(w, 400, "a PIN needs 4 to 32 characters")
+		return
+	}
+	if q.View != nil && !q.View.ok() {
+		fail(w, 400, "the view is not valid")
 		return
 	}
 	for _, id := range q.Drives {
@@ -82,8 +107,13 @@ func (s *server) shareCreate(w http.ResponseWriter, r *http.Request) {
 		pin = hashPin(q.Pin, salt)
 	}
 	ds, _ := json.Marshal(q.Drives)
+	vs := ""
+	if q.View != nil {
+		b, _ := json.Marshal(q.View)
+		vs = string(b)
+	}
 	now := time.Now()
-	x, err := s.db.Exec(`INSERT INTO shares(token,title,drives,created,expires,salt,pin) VALUES(?,?,?,?,?,?,?)`, hashToken(tok), q.Title, string(ds), now.UnixMilli(), now.AddDate(0, 0, q.Days).UnixMilli(), salt, pin)
+	x, err := s.db.Exec(`INSERT INTO shares(token,title,drives,created,expires,salt,pin,view) VALUES(?,?,?,?,?,?,?,?)`, hashToken(tok), q.Title, string(ds), now.UnixMilli(), now.AddDate(0, 0, q.Days).UnixMilli(), salt, pin, vs)
 	if err != nil {
 		fail(w, 500, "database")
 		return
@@ -132,7 +162,7 @@ func (s *server) shareFind(tok string) (*share, bool) {
 	var h share
 	var ds string
 	var e int64
-	if len(tok) != 43 || s.db.QueryRow(`SELECT id,title,drives,expires,salt,pin FROM shares WHERE token=? AND expires>?`, hashToken(tok), time.Now().UnixMilli()).Scan(&h.ID, &h.Title, &ds, &e, &h.salt, &h.pin) != nil {
+	if len(tok) != 43 || s.db.QueryRow(`SELECT id,title,drives,expires,salt,pin,view FROM shares WHERE token=? AND expires>?`, hashToken(tok), time.Now().UnixMilli()).Scan(&h.ID, &h.Title, &ds, &e, &h.salt, &h.pin, &h.view) != nil {
 		return nil, false
 	}
 	json.Unmarshal([]byte(ds), &h.Drives)
@@ -270,5 +300,5 @@ func (s *server) shareData(w http.ResponseWriter, r *http.Request) {
 		out = append(out, x)
 	}
 	s.db.Exec(`UPDATE shares SET opens=opens+1 WHERE id=?`, h.ID)
-	writeJSON(w, 200, map[string]any{"title": h.Title, "expires": h.Expires, "drives": out})
+	writeJSON(w, 200, map[string]any{"title": h.Title, "expires": h.Expires, "drives": out, "view": json.RawMessage(orNull(h.view))})
 }
