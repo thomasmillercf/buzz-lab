@@ -1,4 +1,4 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="uk.buzzlab" android:versionCode="28" android:versionName="2.8">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="uk.buzzlab" android:versionCode="29" android:versionName="2.9">
   <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="36"/>
   <uses-permission android:name="android.permission.VIBRATE"/>
   <uses-permission android:name="android.permission.HIGH_SAMPLING_RATE_SENSORS"/>
@@ -12,11 +12,14 @@
   <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
   <uses-permission android:name="android.permission.RUN_USER_INITIATED_JOBS"/>
   <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+  <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
+  <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
   <application android:label="Buzz Lab" android:debuggable="true" android:allowBackup="false" android:theme="@style/T" android:icon="@mipmap/ic_launcher" android:usesCleartextTraffic="false">
     <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop" android:configChanges="orientation|screenSize|uiMode|keyboardHidden">
       <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
     </activity>
     <service android:name=".SyncJob" android:exported="true" android:permission="android.permission.BIND_JOB_SERVICE"/>
+    <receiver android:name=".Boot" android:exported="false"><intent-filter><action android:name="android.intent.action.BOOT_COMPLETED"/><action android:name="android.intent.action.MY_PACKAGE_REPLACED"/></intent-filter></receiver>
     <service android:name=".RecService" android:exported="false" android:foregroundServiceType="location"/>
   </application>
 </manifest>
