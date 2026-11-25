@@ -34,7 +34,7 @@ func export(id string, n int, lvl float64) []byte {
 	sj, _ := json.Marshal(st)
 	var b bytes.Buffer
 	z := zip.NewWriter(&b)
-	for k, v := range map[string]string{"cars.json": `[{"id":"c1","name":"Hatchback","tyre":""}]`, "drives/" + id + "/meta.json": `{"id":"` + id + `","car":"c1","start":` + id + `,"end":` + id + `,"place":"Seat rail, taped"}`, "drives/" + id + "/stats.json": string(sj), "drives/" + id + "/Location.csv": "h,h,h,h,h,h,h,h\n0.5,1.5,-0.5,NaN,10,NaN,4,NaN\n1.5,NaN,NaN,NaN,10,NaN,4,NaN\n2.5,1.6,-0.6,NaN,NaN,NaN,4,NaN\n"} {
+	for k, v := range map[string]string{"cars.json": `[{"id":"c1","name":"Hatchback","tyre":""}]`, "drives/" + id + "/meta.json": `{"id":"` + id + `","car":"c1","start":` + id + `,"end":` + id + `,"place":"Seat rail, taped","note":"secret words","feel":{"10-30":"Strong"},"auto":` + strconv.FormatBool(id == "1700001000000") + `}`, "drives/" + id + "/stats.json": string(sj), "drives/" + id + "/Location.csv": "h,h,h,h,h,h,h,h\n0.5,1.5,-0.5,NaN,10,NaN,4,NaN\n1.5,NaN,NaN,NaN,10,NaN,4,NaN\n2.5,1.6,-0.6,NaN,NaN,NaN,4,NaN\n"} {
 		w, _ := z.Create(k)
 		io.WriteString(w, v)
 	}
@@ -90,6 +90,14 @@ func TestFlow(t *testing.T) {
 	}
 	if b := do(h, "GET", "/api/drives?from=2023-11-14&to=2023-11-14", nil, "u", pw).Body.String(); strings.Count(b, `"id"`) != 2 {
 		t.Fatal(b)
+	}
+	for q, want := range map[string]int{"": 2, "?auto=true": 1, "?auto=false": 1} {
+		if b := do(h, "GET", "/api/drives"+q, nil, "u", pw).Body.String(); strings.Count(b, `"id"`) != want {
+			t.Fatal(q, b)
+		}
+	}
+	if c := do(h, "GET", "/api/drives?auto=maybe", nil, "u", pw).Code; c != 400 {
+		t.Fatal(c)
 	}
 	if b := do(h, "GET", "/api/drives?to=2023-11-13", nil, "u", pw).Body.String(); strings.Count(b, `"id"`) != 0 {
 		t.Fatal(b)
@@ -179,6 +187,17 @@ func TestShares(t *testing.T) {
 	if c, _ := mkShare(`{"title":"V","drives":["1700000000000"],"days":5,"view":{"lo":50,"hi":30}}`); c != 400 {
 		t.Fatal("bad view", c)
 	}
+	if c, _ := mkShare(`{"title":"R","drives":["1700000000000","1700001000000"],"days":5,"route":true}`); c != 400 {
+		t.Fatal("route for many", c)
+	}
+	_, rp := mkShare(`{"title":"R","drives":["1700000000000"],"days":5,"route":true}`)
+	if b := do(h, "POST", rp+"/data", []byte(`{}`), "", "").Body.String(); !strings.Contains(b, `"route":[[1.5,-0.5,22.4],[1.6,-0.6,-1]]`) || !strings.Contains(b, `"speed":[[0,22.4],[2,-1]]`) {
+		t.Fatal("route share", b[len(b)-200:])
+	}
+	_, np := mkShare(`{"title":"N","drives":["1700000000000"],"days":5}`)
+	if b := do(h, "POST", np+"/data", []byte(`{}`), "", "").Body.String(); strings.Contains(b, "1.5,-0.5") || !strings.Contains(b, `"route":null`) {
+		t.Fatal("route leaked", b[len(b)-200:])
+	}
 	s.db.Exec(`DELETE FROM shares`)
 	if c := do(h, "POST", "/api/shares", []byte(`{}`), "", "").Code; c != 401 {
 		t.Fatal("open create", c)
@@ -197,7 +216,10 @@ func TestShares(t *testing.T) {
 	if w.Code != 200 || strings.Count(b, `"no":`) != 1 {
 		t.Fatal(w.Code, b[:200])
 	}
-	for _, leak := range []string{"1700000000000", "lat", "Location", "raw", "note", "tyre"} {
+	if !strings.Contains(b, `"felt":{"10-30":"Strong"}`) {
+		t.Fatal("felt missing")
+	}
+	for _, leak := range []string{"secret words", "1700000000000", "lat", "Location", "raw", "note", "tyre"} {
 		if strings.Contains(b, leak) {
 			t.Fatal("leaks", leak)
 		}

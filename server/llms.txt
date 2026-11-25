@@ -3,7 +3,7 @@ Vibration recordings from a phone in a car. All paths except /healthz need HTTP 
 
 GET /api/cars                      cars and how many drives each has
 GET /api/drives                    drives, newest first, with a short summary
-GET /api/drives/{id}               one drive: spectrum, per-speed rows, the passenger's marks
+GET /api/drives/{id}               one drive: spectrum, per-speed rows, felt_by_mph (answered after parking) and any marks
 GET /api/average?car=Hatchback           every matching drive of one car combined, weighted by seconds of steady driving
 GET /api/drives/{id}/raw.zip       raw readings in phyphox CSV layout, when they were uploaded
 GET /api/drives/{id}/track          positions once a second with t in seconds from the first reading, empty when sent without them
@@ -14,7 +14,7 @@ DELETE /api/shares/{id}             cancels a link
 GET /api/export.zip                everything: the SQLite database and all raw uploads
 DELETE /api/drives/{id}            removes a drive and its raw readings
 
-Filters for drives and average: car (id or name), place, from and to (YYYY-MM-DD, UTC, inclusive), min_mph and max_mph (0 to 80, steps of 5, default 10 to 80).
+Filters for drives and average: car (id or name), place, auto (true: started by itself, false: started by hand), from and to (YYYY-MM-DD, UTC, inclusive), min_mph and max_mph (0 to 80, steps of 5, default 10 to 80).
 
 Units: band_rms_ms2 is m/s2 rms summed over three axes. amplitude_by_hz is m/s2 per sqrt(Hz). Upper band edges are exclusive.
 phone_length_share_25_35hz is the share along the phone's long side, which is fore-aft when the phone lies flat with its top pointing forward.

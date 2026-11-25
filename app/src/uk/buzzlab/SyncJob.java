@@ -8,8 +8,9 @@ public class SyncJob extends JobService {
   static boolean pending(JSONObject m,String url){ return !m.optBoolean("recording")&&!m.optString("syncedPos").equals(url)&&!m.has("syncErr"); }
   static int waiting(Context c){ int n=0; String u=ui(c).getString("url",""); for(JSONObject m:new Store(c).list())if(pending(m,u))n++; return n; }
   /** Ask Android to run the sync once there is a connection. Safe to call often. */
-  static void schedule(Context c){ if(!ready(c)||waiting(c)==0)return; JobScheduler js=c.getSystemService(JobScheduler.class); if(js.getPendingJob(ID)!=null)return;
-    js.schedule(new JobInfo.Builder(ID,new ComponentName(c,SyncJob.class)).setRequiredNetworkType(ui(c).getBoolean("wifi",false)?JobInfo.NETWORK_TYPE_UNMETERED:JobInfo.NETWORK_TYPE_ANY).setBackoffCriteria(30000,JobInfo.BACKOFF_POLICY_EXPONENTIAL).setPersisted(true).build()); }
+  static void schedule(Context c){ schedule(c,0); }
+  static void schedule(Context c,long wait){ if(!ready(c)||waiting(c)==0)return; JobScheduler js=c.getSystemService(JobScheduler.class); if(js.getPendingJob(ID)!=null)return;
+    js.schedule(new JobInfo.Builder(ID,new ComponentName(c,SyncJob.class)).setRequiredNetworkType(ui(c).getBoolean("wifi",false)?JobInfo.NETWORK_TYPE_UNMETERED:JobInfo.NETWORK_TYPE_ANY).setBackoffCriteria(30000,JobInfo.BACKOFF_POLICY_EXPONENTIAL).setMinimumLatency(wait).setPersisted(true).build()); }
   // ---------- notifications
   static void channel(Context c){ c.getSystemService(NotificationManager.class).createNotificationChannel(new NotificationChannel("sync","Uploads",NotificationManager.IMPORTANCE_LOW)); }
   static Notification.Builder nb(Context c,String title,String text){ channel(c); return new Notification.Builder(c,"sync").setSmallIcon(android.R.drawable.stat_sys_upload).setColor(0xFFFF803A).setContentTitle(title).setContentText(text).setStyle(new Notification.BigTextStyle().bigText(text)).setOnlyAlertOnce(true).setContentIntent(PendingIntent.getActivity(c,9,new Intent(c,MainActivity.class).putExtra("tab","sync").addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT)); }

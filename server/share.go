@@ -30,6 +30,7 @@ type share struct {
 	Created string   `json:"created"`
 	Expires string   `json:"expires"`
 	HasPin  bool     `json:"has_pin"`
+	Route   bool     `json:"route_map"`
 	Opens   int      `json:"opens"`
 	salt    string
 	pin     string
@@ -76,6 +77,7 @@ func (s *server) shareCreate(w http.ResponseWriter, r *http.Request) {
 		Days   int      `json:"days"`
 		Pin    string   `json:"pin"`
 		View   *view    `json:"view"`
+		Route  bool     `json:"route"`
 	}
 	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&q) != nil {
 		fail(w, 400, "not valid JSON")
@@ -88,6 +90,10 @@ func (s *server) shareCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	if q.Pin != "" && (len(q.Pin) < 4 || len(q.Pin) > 32) {
 		fail(w, 400, "a PIN needs 4 to 32 characters")
+		return
+	}
+	if q.Route && len(q.Drives) != 1 {
+		fail(w, 400, "a route map can only be shared for a single drive")
 		return
 	}
 	if q.View != nil && !q.View.ok() {
@@ -113,7 +119,7 @@ func (s *server) shareCreate(w http.ResponseWriter, r *http.Request) {
 		vs = string(b)
 	}
 	now := time.Now()
-	x, err := s.db.Exec(`INSERT INTO shares(token,title,drives,created,expires,salt,pin,view) VALUES(?,?,?,?,?,?,?,?)`, hashToken(tok), q.Title, string(ds), now.UnixMilli(), now.AddDate(0, 0, q.Days).UnixMilli(), salt, pin, vs)
+	x, err := s.db.Exec(`INSERT INTO shares(token,title,drives,created,expires,salt,pin,view,route) VALUES(?,?,?,?,?,?,?,?,?)`, hashToken(tok), q.Title, string(ds), now.UnixMilli(), now.AddDate(0, 0, q.Days).UnixMilli(), salt, pin, vs, q.Route)
 	if err != nil {
 		fail(w, 500, "database")
 		return
@@ -123,7 +129,7 @@ func (s *server) shareCreate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) shareList(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.db.Query(`SELECT id,title,drives,created,expires,pin,opens FROM shares ORDER BY id DESC`)
+	rows, err := s.db.Query(`SELECT id,title,drives,created,expires,pin,opens,route FROM shares ORDER BY id DESC`)
 	if err != nil {
 		fail(w, 500, "database")
 		return
@@ -134,7 +140,7 @@ func (s *server) shareList(w http.ResponseWriter, r *http.Request) {
 		var h share
 		var ds string
 		var c, e int64
-		if rows.Scan(&h.ID, &h.Title, &ds, &c, &e, &h.pin, &h.Opens) != nil {
+		if rows.Scan(&h.ID, &h.Title, &ds, &c, &e, &h.pin, &h.Opens, &h.Route) != nil {
 			fail(w, 500, "database")
 			return
 		}
@@ -162,12 +168,37 @@ func (s *server) shareFind(tok string) (*share, bool) {
 	var h share
 	var ds string
 	var e int64
-	if len(tok) != 43 || s.db.QueryRow(`SELECT id,title,drives,expires,salt,pin,view FROM shares WHERE token=? AND expires>?`, hashToken(tok), time.Now().UnixMilli()).Scan(&h.ID, &h.Title, &ds, &e, &h.salt, &h.pin, &h.view) != nil {
+	if len(tok) != 43 || s.db.QueryRow(`SELECT id,title,drives,expires,salt,pin,view,route FROM shares WHERE token=? AND expires>?`, hashToken(tok), time.Now().UnixMilli()).Scan(&h.ID, &h.Title, &ds, &e, &h.salt, &h.pin, &h.view, &h.Route) != nil {
 		return nil, false
 	}
 	json.Unmarshal([]byte(ds), &h.Drives)
 	h.Expires, h.HasPin = time.UnixMilli(e).UTC().Format("2 January 2006"), h.pin != ""
 	return &h, true
+}
+
+// shareTrip gives a single shared drive its speed over time, and its route only when the sharer chose to include it.
+func (s *server) shareTrip(h *share, out []shareDrive) any {
+	if len(h.Drives) != 1 || len(out) != 1 {
+		return nil
+	}
+	pts, err := s.readTrack(h.Drives[0])
+	if err != nil || len(pts) < 2 {
+		return nil
+	}
+	t0 := pts[0].T
+	sp := make([][2]float64, 0, len(pts))
+	var route [][3]float64
+	for _, p := range pts {
+		m := -1.0
+		if p.Mph != nil {
+			m = *p.Mph
+		}
+		sp = append(sp, [2]float64{math.Round((p.T-t0)*10) / 10, math.Round(m*10) / 10})
+		if h.Route && p.Acc <= 40 && (p.Lat != 0 || p.Lon != 0) {
+			route = append(route, [3]float64{math.Round(p.Lat*1e5) / 1e5, math.Round(p.Lon*1e5) / 1e5, math.Round(m*10) / 10})
+		}
+	}
+	return map[string]any{"speed": sp, "route": route}
 }
 
 func shareHeaders(w http.ResponseWriter, nonce string) {
@@ -176,7 +207,7 @@ func shareHeaders(w http.ResponseWriter, nonce string) {
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("X-Robots-Tag", "noindex, nofollow")
 	h.Set("Referrer-Policy", "no-referrer")
-	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-"+nonce+"'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-"+nonce+"'; connect-src 'self'; img-src https://tile.openstreetmap.org; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 }
 
 // shareView serves the page. It holds no results: those come from shareData, after any PIN.
@@ -200,17 +231,18 @@ func (s *server) shareView(w http.ResponseWriter, r *http.Request) {
 }
 
 type shareDrive struct {
-	N       int         `json:"no"`
-	Car     string      `json:"car"`
-	Date    string      `json:"date"`
-	Place   string      `json:"place"`
-	Minutes float64     `json:"minutes"`
-	Circ    float64     `json:"wheel_m,omitempty"`
-	Strong  int         `json:"strong"`
-	Weak    int         `json:"weak"`
-	Gone    int         `json:"gone"`
-	Count   []int       `json:"n"`
-	PSD     [][]float64 `json:"psd"`
+	N       int               `json:"no"`
+	Car     string            `json:"car"`
+	Date    string            `json:"date"`
+	Place   string            `json:"place"`
+	Minutes float64           `json:"minutes"`
+	Circ    float64           `json:"wheel_m,omitempty"`
+	Strong  int               `json:"strong"`
+	Weak    int               `json:"weak"`
+	Gone    int               `json:"gone"`
+	Feel    map[string]string `json:"felt,omitempty"`
+	Count   []int             `json:"n"`
+	PSD     [][]float64       `json:"psd"`
 }
 
 var tyreRe = regexp.MustCompile(`(\d{3})\s*/\s*(\d{2})\s*[Zz]?[Rr]\s*(\d{2})`)
@@ -261,7 +293,7 @@ func (s *server) shareData(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	all, err := s.load(query{to: math.MaxInt64}, "")
+	all, err := s.load(query{to: math.MaxInt64, auto: -1}, "")
 	if err != nil {
 		fail(w, 500, "database")
 		return
@@ -277,7 +309,7 @@ func (s *server) shareData(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		st := d.stats()
-		x := shareDrive{N: len(out) + 1, Car: d.CarName, Date: time.UnixMilli(d.startMs).UTC().Format("2 January 2006"), Place: d.Place, Minutes: math.Round(d.Minutes*10) / 10, Circ: circ(d.Tyre), Count: st.N}
+		x := shareDrive{N: len(out) + 1, Car: d.CarName, Date: time.UnixMilli(d.startMs).UTC().Format("2 January 2006"), Place: d.Place, Feel: d.Feel, Minutes: math.Round(d.Minutes*10) / 10, Circ: circ(d.Tyre), Count: st.N}
 		for _, p := range st.PSD {
 			q := make([]float64, len(p))
 			for k, v := range p {
@@ -300,5 +332,5 @@ func (s *server) shareData(w http.ResponseWriter, r *http.Request) {
 		out = append(out, x)
 	}
 	s.db.Exec(`UPDATE shares SET opens=opens+1 WHERE id=?`, h.ID)
-	writeJSON(w, 200, map[string]any{"title": h.Title, "expires": h.Expires, "drives": out, "view": json.RawMessage(orNull(h.view))})
+	writeJSON(w, 200, map[string]any{"title": h.Title, "expires": h.Expires, "drives": out, "view": json.RawMessage(orNull(h.view)), "trip": s.shareTrip(h, out)})
 }

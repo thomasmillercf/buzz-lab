@@ -46,14 +46,16 @@ type server struct {
 }
 
 type meta struct {
-	ID       string `json:"id"`
-	Start    int64  `json:"start"`
-	End      int64  `json:"end"`
-	Car      string `json:"car"`
-	Place    string `json:"place"`
-	Note     string `json:"note"`
-	Tyre     string `json:"tyre"`
-	Imported string `json:"imported,omitempty"`
+	ID       string            `json:"id"`
+	Start    int64             `json:"start"`
+	End      int64             `json:"end"`
+	Car      string            `json:"car"`
+	Place    string            `json:"place"`
+	Note     string            `json:"note"`
+	Tyre     string            `json:"tyre"`
+	Imported string            `json:"imported,omitempty"`
+	Feel     map[string]string `json:"feel"`
+	Auto     bool              `json:"auto"`
 }
 
 type stats struct {
@@ -86,6 +88,15 @@ CREATE INDEX IF NOT EXISTS drives_car ON drives(car,start);` + shareSchema)
 	}
 	// added after the first release; an existing column is not an error
 	if _, e := db.Exec(`ALTER TABLE shares ADD COLUMN view TEXT NOT NULL DEFAULT ''`); e != nil && !strings.Contains(e.Error(), "duplicate column") {
+		return nil, e
+	}
+	if _, e := db.Exec(`ALTER TABLE shares ADD COLUMN route INTEGER NOT NULL DEFAULT 0`); e != nil && !strings.Contains(e.Error(), "duplicate column") {
+		return nil, e
+	}
+	if _, e := db.Exec(`ALTER TABLE drives ADD COLUMN auto INTEGER NOT NULL DEFAULT 0`); e != nil && !strings.Contains(e.Error(), "duplicate column") {
+		return nil, e
+	}
+	if _, e := db.Exec(`ALTER TABLE drives ADD COLUMN feel TEXT NOT NULL DEFAULT ''`); e != nil && !strings.Contains(e.Error(), "duplicate column") {
 		return nil, e
 	}
 	return db, nil
@@ -254,8 +265,13 @@ func (s *server) ingest(z *zip.Reader) ([]string, error) {
 			return nil, errors.New("drive " + m.ID + " has a bad stats.json")
 		}
 		mk, _ := readZip(z, "drives/"+m.ID+"/marks.csv", 1<<20)
-		if _, err := tx.Exec(`INSERT INTO drives VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET car=excluded.car,start=excluded.start,end=excluded.end,place=excluded.place,note=excluded.note,tyre=excluded.tyre,stats=excluded.stats,marks=excluded.marks,uploaded=excluded.uploaded`,
-			m.ID, m.Car, m.Start, m.End, m.Place, m.Note, m.Tyre, string(sb), string(mk), time.Now().UnixMilli()); err != nil {
+		fe := ""
+		if len(m.Feel) > 0 && len(m.Feel) < 10 {
+			b, _ := json.Marshal(m.Feel)
+			fe = string(b)
+		}
+		if _, err := tx.Exec(`INSERT INTO drives(id,car,start,end,place,note,tyre,stats,marks,uploaded,feel,auto) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET car=excluded.car,start=excluded.start,end=excluded.end,place=excluded.place,note=excluded.note,tyre=excluded.tyre,stats=excluded.stats,marks=excluded.marks,uploaded=excluded.uploaded,feel=excluded.feel,auto=excluded.auto`,
+			m.ID, m.Car, m.Start, m.End, m.Place, m.Note, m.Tyre, string(sb), string(mk), time.Now().UnixMilli(), fe, m.Auto); err != nil {
 			return nil, err
 		}
 		ids = append(ids, m.ID)
@@ -279,17 +295,19 @@ func (s stats) valid() bool {
 }
 
 type drive struct {
-	ID       string   `json:"id"`
-	Car      string   `json:"car"`
-	CarName  string   `json:"car_name"`
-	Start    string   `json:"start"`
-	Minutes  float64  `json:"minutes"`
-	Place    string   `json:"place"`
-	Note     string   `json:"note,omitempty"`
-	Tyre     string   `json:"tyre,omitempty"`
-	Marks    string   `json:"marks_csv,omitempty"`
-	HasRaw   bool     `json:"has_raw"`
-	Summary  *summary `json:"summary,omitempty"`
+	ID       string            `json:"id"`
+	Car      string            `json:"car"`
+	CarName  string            `json:"car_name"`
+	Start    string            `json:"start"`
+	Minutes  float64           `json:"minutes"`
+	Place    string            `json:"place"`
+	Note     string            `json:"note,omitempty"`
+	Tyre     string            `json:"tyre,omitempty"`
+	Marks    string            `json:"marks_csv,omitempty"`
+	HasRaw   bool              `json:"has_raw"`
+	Feel     map[string]string `json:"felt_by_mph,omitempty"`
+	Auto     bool              `json:"started_by_itself"`
+	Summary  *summary          `json:"summary,omitempty"`
 	startMs  int64
 	statsRaw string
 }
@@ -403,10 +421,20 @@ type query struct {
 	car, place string
 	from, to   int64
 	lo, hi     int
+	auto       int // -1 any, 1 started by itself, 0 started by hand
 }
 
 func parse(r *http.Request) (query, error) {
-	v, q := r.URL.Query(), query{to: math.MaxInt64, lo: 10, hi: 80}
+	v, q := r.URL.Query(), query{to: math.MaxInt64, lo: 10, hi: 80, auto: -1}
+	switch v.Get("auto") {
+	case "":
+	case "true":
+		q.auto = 1
+	case "false":
+		q.auto = 0
+	default:
+		return q, errors.New("auto must be true or false")
+	}
 	q.car, q.place = v.Get("car"), v.Get("place")
 	for k, d := range map[string]*int64{"from": &q.from, "to": &q.to} {
 		if x := v.Get(k); x != "" {
@@ -432,8 +460,8 @@ func parse(r *http.Request) (query, error) {
 	return q, nil
 }
 func (s *server) load(q query, id string) ([]drive, error) {
-	rows, err := s.db.Query(`SELECT d.id,d.car,COALESCE(c.name,d.car),d.start,d.end,d.place,d.note,COALESCE(NULLIF(d.tyre,''),c.tyre,''),d.stats,d.marks FROM drives d LEFT JOIN cars c ON c.id=d.car
-WHERE (?='' OR d.id=?) AND (?='' OR d.car=? OR c.name=? COLLATE NOCASE) AND (?='' OR d.place=?) AND d.start BETWEEN ? AND ? ORDER BY d.start DESC`, id, id, q.car, q.car, q.car, q.place, q.place, q.from, q.to)
+	rows, err := s.db.Query(`SELECT d.id,d.car,COALESCE(c.name,d.car),d.start,d.end,d.place,d.note,COALESCE(NULLIF(d.tyre,''),c.tyre,''),d.stats,d.marks,d.feel,d.auto FROM drives d LEFT JOIN cars c ON c.id=d.car
+WHERE (?='' OR d.id=?) AND (?='' OR d.car=? OR c.name=? COLLATE NOCASE) AND (?='' OR d.place=?) AND d.start BETWEEN ? AND ? AND (?<0 OR d.auto=?) ORDER BY d.start DESC`, id, id, q.car, q.car, q.car, q.place, q.place, q.from, q.to, q.auto, q.auto)
 	if err != nil {
 		return nil, err
 	}
@@ -442,10 +470,12 @@ WHERE (?='' OR d.id=?) AND (?='' OR d.car=? OR c.name=? COLLATE NOCASE) AND (?='
 	for rows.Next() {
 		var d drive
 		var end int64
-		if err := rows.Scan(&d.ID, &d.Car, &d.CarName, &d.startMs, &end, &d.Place, &d.Note, &d.Tyre, &d.statsRaw, &d.Marks); err != nil {
+		var fe string
+		if err := rows.Scan(&d.ID, &d.Car, &d.CarName, &d.startMs, &end, &d.Place, &d.Note, &d.Tyre, &d.statsRaw, &d.Marks, &fe, &d.Auto); err != nil {
 			return nil, err
 		}
 		d.Start, d.Minutes = time.UnixMilli(d.startMs).UTC().Format(time.RFC3339), round(float64(end-d.startMs)/60000)
+		json.Unmarshal([]byte(fe), &d.Feel)
 		out = append(out, d)
 	}
 	for i := range out {
@@ -478,7 +508,7 @@ func (s *server) one(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err.Error())
 		return
 	}
-	ds, err := s.load(query{to: math.MaxInt64}, r.PathValue("id"))
+	ds, err := s.load(query{to: math.MaxInt64, auto: -1}, r.PathValue("id"))
 	if err != nil {
 		fail(w, 500, "database")
 		return
@@ -548,6 +578,20 @@ type point struct {
 	Acc float64  `json:"accuracy_m"`
 }
 
+// readTrack reads the GPS rows kept with a drive's raw upload.
+func (s *server) readTrack(id string) ([]point, error) {
+	z, err := zip.OpenReader(s.raw(id))
+	if err != nil {
+		return nil, err
+	}
+	defer z.Close()
+	b, err := readZip(&z.Reader, "drives/"+id+"/Location.csv", 32<<20)
+	if err != nil {
+		return nil, err
+	}
+	return parseTrack(b)
+}
+
 // track reads positions from the raw upload; drives sent without positions have none.
 func (s *server) track(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
@@ -555,23 +599,20 @@ func (s *server) track(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "no such drive")
 		return
 	}
-	z, err := zip.OpenReader(s.raw(id))
-	if err != nil {
-		fail(w, 404, "no raw readings for this drive")
-		return
-	}
-	defer z.Close()
-	b, err := readZip(&z.Reader, "drives/"+id+"/Location.csv", 32<<20)
+	out, err := s.readTrack(id)
 	if err != nil {
 		fail(w, 404, "no positions for this drive")
 		return
 	}
+	writeJSON(w, 200, map[string]any{"id": id, "points": out})
+}
+
+func parseTrack(b []byte) ([]point, error) {
 	c := csv.NewReader(strings.NewReader(string(b)))
 	c.FieldsPerRecord = -1
 	rows, err := c.ReadAll()
 	if err != nil {
-		fail(w, 500, "positions could not be read")
-		return
+		return nil, err
 	}
 	num := func(x string) (float64, bool) {
 		v, err := strconv.ParseFloat(x, 64)
@@ -599,7 +640,7 @@ func (s *server) track(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, p)
 	}
-	writeJSON(w, 200, map[string]any{"id": id, "points": out})
+	return out, nil
 }
 
 // export streams everything: a consistent copy of the database plus every raw upload.
