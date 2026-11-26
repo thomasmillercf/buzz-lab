@@ -8,9 +8,9 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import kotlin.math.PI
 
-/** Cars and drives as files in app-private storage. */
-class Store(c: Context) {
-    @JvmField val dir: File = c.filesDir
+/** Cars and drives as files in app-private storage, or in any folder for tests. */
+class Store(@JvmField val dir: File) {
+    constructor(c: Context) : this(c.filesDir)
 
     @JvmField val drives = File(dir, "drives").apply { mkdirs() }
 
