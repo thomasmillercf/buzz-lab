@@ -265,7 +265,7 @@ func TestAppSignIn(t *testing.T) {
 		t.Fatal("not sent back to the app page", l)
 	}
 	w := b.do("GET", start, nil)
-	if w.Code != 200 || !strings.Contains(w.Body.String(), "Pixel &lt;b&gt;9&lt;/b&gt;") || !strings.Contains(w.Header().Get("Content-Security-Policy"), "form-action 'self' buzzlab:") {
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "Pixel &lt;b&gt;9&lt;/b&gt;") || !strings.Contains(w.Header().Get("Content-Security-Policy"), "form-action 'self' buzzlab:") || w.Header().Get("Referrer-Policy") != "same-origin" {
 		t.Fatal("ask page", w.Code, w.Body.String())
 	}
 	if c := b.do("GET", "/auth/app?c=short", nil).Code; c != 400 {
@@ -284,6 +284,9 @@ func TestAppSignIn(t *testing.T) {
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
 		return w
+	}
+	if c := allow("null").Code; c != 403 {
+		t.Fatal("null origin allowed", c)
 	}
 	if c := allow("https://evil.example").Code; c != 403 {
 		t.Fatal("cross-site allow", c)

@@ -67,6 +67,8 @@ func appHeaders(w http.ResponseWriter) {
 	shareHeaders(w, "none")
 	// the Allow form posts here, and the answer sends the browser on to the app
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' buzzlab:; base-uri 'none'; frame-ancestors 'none'")
+	// with no-referrer, Chrome sends "Origin: null" on the Allow form and the origin check below refuses it
+	w.Header().Set("Referrer-Policy", "same-origin")
 }
 
 // appAsk asks the signed-in owner to confirm, so a page elsewhere can't sign an app in unseen.
