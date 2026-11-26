@@ -1,4 +1,4 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="uk.buzzlab" android:versionCode="31" android:versionName="3.1">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="uk.buzzlab" android:versionCode="32" android:versionName="3.2">
   <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="36"/>
   <uses-permission android:name="android.permission.VIBRATE"/>
   <uses-permission android:name="android.permission.HIGH_SAMPLING_RATE_SENSORS"/>
@@ -17,6 +17,8 @@
   <application android:label="Buzz Lab" android:debuggable="true" android:allowBackup="false" android:theme="@style/T" android:icon="@mipmap/ic_launcher" android:usesCleartextTraffic="false">
     <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop" android:configChanges="orientation|screenSize|uiMode|keyboardHidden">
       <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
+    </activity>
+    <activity android:name=".SignInReturn" android:exported="true" android:theme="@android:style/Theme.NoDisplay" android:noHistory="true" android:excludeFromRecents="true">
       <intent-filter><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="buzzlab" android:host="signin"/></intent-filter>
     </activity>
     <service android:name=".SyncJob" android:exported="true" android:permission="android.permission.BIND_JOB_SERVICE"/>

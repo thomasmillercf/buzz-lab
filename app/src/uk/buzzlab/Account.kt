@@ -1,10 +1,12 @@
 package uk.buzzlab
 
+import android.app.Activity
 import android.app.AlertDialog
 import android.app.job.JobScheduler
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.util.Base64
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -56,8 +58,16 @@ fun MainActivity.signIn() {
     ui.edit().putString("pkce", v).putString("pkceUrl", base).putBoolean("welcomed", true).apply()
     val name = "${Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} ${Build.MODEL}"
     val u = Uri.parse("$base/auth/app").buildUpon().appendQueryParameter("c", c).appendQueryParameter("name", name).build()
+    // A Custom Tab: Chrome's own sign-in, with the saved Google account, shown over the app. Google refuses
+    // sign-in inside a WebView. These are the Custom Tabs extras, set by hand because the app has no
+    // support library; a browser without Custom Tabs ignores them and opens normally.
+    val i = Intent(Intent.ACTION_VIEW, u)
+        .putExtras(Bundle().apply { putBinder("android.support.customtabs.extra.SESSION", null) })
+        .putExtra("android.support.customtabs.extra.TOOLBAR_COLOR", MainActivity.BG)
+        .putExtra("android.support.customtabs.extra.TITLE_VISIBILITY", 1)
+        .putExtra("androidx.browser.customtabs.extra.SHARE_STATE", 2)
     try {
-        startActivity(Intent(Intent.ACTION_VIEW, u))
+        startActivity(i)
     } catch (_: Exception) {
         toast("No web browser found to sign in with.", true)
     }
@@ -133,4 +143,19 @@ fun MainActivity.signOut() {
         }
         .setNegativeButton("Stay signed in", null)
         .show()
+}
+
+/**
+ * Where the browser lands with buzzlab://signin. It hands the code to the app already open, closing the
+ * sign-in tab that sits above it, instead of starting a second copy on top.
+ */
+class SignInReturn : Activity() {
+    override fun onCreate(b: Bundle?) {
+        super.onCreate(b)
+        startActivity(
+            Intent(this, MainActivity::class.java).setAction(Intent.ACTION_VIEW).setData(intent?.data)
+                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+        )
+        finish()
+    }
 }
