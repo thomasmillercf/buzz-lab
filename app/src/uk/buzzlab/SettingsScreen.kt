@@ -28,12 +28,14 @@ fun MainActivity.settings() {
     section("Server")
     button("Sync", syncLine().replaceFirst(Regex("^\\S+\\s+"), "")) { syncPage { settings() } }
     when {
-        signedIn() -> button("Signed in", "${pref("email")}. Tap to sign out and stay offline.") { signOut() }
+        signedIn() -> note("Signed in as ${pref("email")}", 15)
         server -> button("Server settings", url()) { syncSetup() }
         Scenes.SERVER.isNotEmpty() -> button("Sign in with Google", "Offline only now. Sign in to back up drives and see them on the web.") { signIn() }
         else -> button("Server settings", "Not set up. Drives stay on this phone.") { syncSetup() }
     }
     if (!signedIn() && server && Scenes.SERVER.isNotEmpty()) button("Sign in with Google instead", "Use your Google account instead of a password") { signIn() }
+    if (server) button("Download drives from the server", "Any that aren't on this phone, for a new phone or after deleting") { offerRestore(false) }
+    if (server) quiet(button("Sign out") { signOut() })
     if (server) {
         section("Sharing")
         button("Share results", "Make a link to drives you choose") { sharePage(null, null, null) { settings() } }

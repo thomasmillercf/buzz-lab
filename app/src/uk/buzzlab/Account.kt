@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Base64
 import org.json.JSONObject
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
@@ -21,6 +22,22 @@ import kotlin.concurrent.thread
 
 /** Signed in with Google rather than a typed user name and password. */
 fun MainActivity.signedIn() = pref("tok").isNotEmpty()
+
+/** On Home while offline: an invitation to sign in, unless put off with Not now. True when shown. */
+fun MainActivity.signInCard(): Boolean {
+    if (SyncJob.ready(this) || Scenes.SERVER.isEmpty() || System.currentTimeMillis() < ui.getLong("cardUntil", 0)) return false
+    text("", 6)
+    button("Sign in with Google", "You're offline. Sign in to back up your drives, see them on the web and share results.") { signIn() }
+        .setTextColor(MainActivity.AC)
+    quiet(
+        button("Not now") {
+            ui.edit().putLong("cardUntil", System.currentTimeMillis() + 14 * 86_400_000L).apply()
+            toast("You can sign in any time in Settings.")
+            show("home")
+        },
+    )
+    return true
+}
 
 /** First start: sign in, or stay offline. */
 fun MainActivity.welcome() {
@@ -114,7 +131,62 @@ fun MainActivity.finishSignIn(back: Uri) {
             toast("Signed in as ${o.optString("email")}", true)
             SyncJob.schedule(this)
             settings()
+            offerRestore(true)
         }
+    }
+}
+
+/** Offers to download drives that are on the server but not on this phone. quiet skips "nothing to do". */
+fun MainActivity.offerRestore(quiet: Boolean) {
+    api("GET", "/api/drives?min_mph=0&max_mph=80", null) { code, body ->
+        if (code != 200) {
+            if (!quiet) toast(problem(code, body), true)
+            return@api
+        }
+        val have = st.list().map { it.optString("id") }.toSet()
+        val all = runCatching { JSONObject(body).getJSONArray("drives").objects() }.getOrDefault(emptyList())
+        val ids = all.filter { it.optBoolean("has_raw") && it.optString("id") !in have }.map { it.optString("id") }
+        if (ids.isEmpty()) {
+            if (!quiet) toast("This phone already has every drive on the server.")
+            return@api
+        }
+        val n = if (ids.size == 1) "1 drive is" else "${ids.size} drives are"
+        AlertDialog.Builder(this)
+            .setMessage("$n on the server but not on this phone. Download them? Readings, routes and marks all come back.")
+            .setPositiveButton("Download") { _, _ -> restoreAll(ids) }
+            .setNegativeButton("Not now", null)
+            .show()
+    }
+}
+
+private fun MainActivity.restoreAll(ids: List<String>) {
+    page("Download drives") { settings() }
+    status = text("Starting…", 15)
+    val base = url()
+    val auth = SyncJob.auth(ui)
+    thread {
+        var ok = 0
+        var why = ""
+        for ((i, id) in ids.withIndex()) {
+            say("Downloading ${i + 1} of ${ids.size}…")
+            try {
+                val h = URL("$base/api/drives/$id/raw.zip").openConnection() as HttpURLConnection
+                h.connectTimeout = 15000
+                h.readTimeout = 120000
+                h.instanceFollowRedirects = false
+                h.setRequestProperty("Authorization", auth)
+                if (h.responseCode != 200) throw IOException("server said ${h.responseCode}")
+                h.inputStream.use { Restore.drive(st, it, base) }
+                h.disconnect()
+                ok++
+            } catch (x: Exception) {
+                why = SyncJob.why(x)
+                SyncJob.log(this, "restore $id: $why")
+            }
+        }
+        val left = ids.size - ok
+        say(if (left == 0) "Done. $ok downloaded." else "$ok downloaded, $left didn't: $why. Try again from Settings.")
+        runOnUiThread { toast(if (left == 0) "Drives downloaded" else "$left drives didn't download", left > 0) }
     }
 }
 

@@ -59,6 +59,7 @@ fun MainActivity.home() {
         )
     }
     askAboutLastDrive()
+    if (signInCard()) return // offline: offer sign-in in place of the sync line
     val sy = button(syncLine()) { syncPage() }
     sy.textSize = 14f
     SyncJob.schedule(this)
