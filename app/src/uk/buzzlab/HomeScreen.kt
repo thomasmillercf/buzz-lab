@@ -50,7 +50,7 @@ fun MainActivity.home() {
         val watching = RecService.svc?.watch == true
         text(
             if (watching) {
-                "◉  Automatic recording is on. It starts once you're above ${RecService.START_MPH.toInt()} mph."
+                "◉  Automatic recording is on. It starts when Android Auto connects, or once you're above ${RecService.START_MPH.toInt()} mph."
             } else {
                 "Automatic recording is on but not running. Open Settings to turn it back on."
             },

@@ -5,7 +5,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 K=$1
-OUT=out-test ./build.sh "$K" >/dev/null
+L=$(mktemp); OUT=out-test ./build.sh "$K" > "$L" 2>&1 || { grep -vE "^warning|^Info:" "$L" | tail -30; rm -f "$L"; exit 1; }; rm -f "$L"
 export JAVA_HOME=$K/jdk PATH=$K/jdk/bin:$PATH
 AJ=$(find "$K" -name android.jar | head -1)
 KS=$K/kotlinc/lib/kotlin-stdlib.jar

@@ -5,7 +5,10 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -14,6 +17,7 @@ import android.hardware.SensorManager
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.HandlerThread
@@ -31,6 +35,9 @@ import java.io.FileOutputStream
 import java.io.FileWriter
 import java.io.IOException
 import java.io.PrintWriter
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * Records accelerometer at full rate and GPS speed, with the screen off too.
@@ -102,6 +109,8 @@ class RecService :
     private var slowSince = 0L
     private var lastMoving = 0L
     private var interval = -1L
+    private val carRule = CarRule()
+    private var carWatch: BroadcastReceiver? = null
 
     override fun onBind(i: Intent?): IBinder? = null
 
@@ -127,12 +136,14 @@ class RecService :
             th = HandlerThread("rec").also { it.start() }
             h = Handler(th!!.looper)
             svc = this
+            listenForCar()
         }
         h!!.post {
             when (a) {
                 WATCH -> {
                     watch = true
                     Log.i("BUZZLAB", "AUTO watching")
+                    checkCar()
                 }
                 UNWATCH -> {
                     watch = false
@@ -142,7 +153,7 @@ class RecService :
                         return@post
                     }
                 }
-                RECORD -> if (live == null && i != null) startDrive(i.getStringExtra("car"), i.getStringExtra("place"), i.getStringExtra("tyre"), false)
+                RECORD -> if (live == null && i != null) startDrive(i.getStringExtra("car"), i.getStringExtra("place"), i.getStringExtra("tyre"), "")
             }
             gpsRate()
             refresh()
@@ -159,7 +170,11 @@ class RecService :
             auto -> "Recording drive (started by itself)"
             else -> "Recording drive"
         }
-        val text = if (r) "Vibration and speed. Tap to open." else "Starts recording once you're above ${START_MPH.toInt()} mph. Turn off in Settings."
+        val text = if (r) {
+            "Vibration and speed. Tap to open."
+        } else {
+            "Starts recording when Android Auto connects or you're above ${START_MPH.toInt()} mph. Turn off in Settings."
+        }
         return Notification.Builder(this, "rec").setSmallIcon(android.R.drawable.ic_menu_compass).setContentTitle(title).setContentText(text).setOngoing(true)
             .setContentIntent(PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)).build()
     }
@@ -186,7 +201,9 @@ class RecService :
         }
     }
 
-    private fun startDrive(car: String?, place: String?, tyre: String?, byItself: Boolean) {
+    /** how: "" when started by hand, else what started it: "speed" or "android-auto". */
+    private fun startDrive(car: String?, place: String?, tyre: String?, how: String) {
+        val byItself = how.isNotEmpty()
         try {
             discard = false
             paused = false
@@ -205,7 +222,7 @@ class RecService :
             val did = startMs.toString()
             val d = st.driveDir(did).apply { mkdirs() }
             meta = JSONObject().put("id", did).put("start", startMs).put("car", car).put("place", place).put("note", "").put("tyre", tyre)
-                .put("recording", true).put("auto", byItself)
+                .put("recording", true).put("auto", byItself).put("startedBy", how.ifEmpty { "hand" })
                 .also { st.saveMeta(it) }
             acc = DataOutputStream(BufferedOutputStream(FileOutputStream(File(d, "acc.bin")), 1 shl 16))
             gps = PrintWriter(BufferedWriter(FileWriter(File(d, "gps.csv")))).apply { println("t_ns,lat,lon,speed_ms,acc_m,bearing") }
@@ -276,12 +293,13 @@ class RecService :
             val speed = if (l.hasSpeed()) l.speed.toString() else ""
             val bearing = if (l.hasBearing()) l.bearing.toString() else ""
             gps?.println("${l.elapsedRealtimeNanos},${l.latitude},${l.longitude},$speed,${l.accuracy},$bearing")
-            if (auto) {
+            // While Android Auto is connected, its disconnect ends the drive, so a long wait in traffic doesn't.
+            if (auto && !carRule.car) {
                 if (v < STOP_MPH) {
                     if (slowSince == 0L) {
                         slowSince = now
                     } else if (now - slowSince > STOP_AFTER_MS) {
-                        Log.i("BUZZLAB", "AUTO stopped moving, saving")
+                        note(this, "Stopped for ${STOP_AFTER_MS / 60000} minutes, drive saved")
                         endDrive(false)
                     }
                 } else {
@@ -292,18 +310,58 @@ class RecService :
             fast = if (v >= START_MPH) fast + 1 else 0
             if (fast >= START_FIXES) {
                 fast = 0
-                autoStart()
+                note(this, "Above ${START_MPH.toInt()} mph, recording started")
+                autoStart("speed")
             }
         }
+        checkCar()
         gpsRate()
     }
 
+    /** Hears Android Auto connect and disconnect. Checked again on every GPS fix, in case a broadcast is missed. */
+    private fun listenForCar() {
+        val r = object : BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) {
+                h?.post { checkCar() }
+            }
+        }
+        val f = IntentFilter(CarLink.ACTION)
+        try {
+            if (Build.VERSION.SDK_INT >= 33) registerReceiver(r, f, Context.RECEIVER_EXPORTED) else registerReceiver(r, f)
+            carWatch = r
+        } catch (e: Exception) {
+            Log.w("BUZZLAB", "car watch $e")
+        }
+    }
+
+    /** On the recording thread: start or save around Android Auto. */
+    private fun checkCar() {
+        val connected = CarLink.connected(this)
+        when (carRule.step(System.currentTimeMillis(), connected, watch, live != null, auto, topMph)) {
+            CarRule.Act.START -> {
+                note(this, "Android Auto connected, recording started")
+                autoStart("android-auto")
+            }
+            CarRule.Act.CONNECTED -> note(this, "Android Auto connected" + if (live != null) ", already recording" else ", not watching")
+            CarRule.Act.SAVE -> {
+                note(this, "Android Auto disconnected, drive saved")
+                endDrive(false)
+            }
+            CarRule.Act.DISCARD -> {
+                note(this, "Android Auto disconnected; the car never moved, so nothing was kept")
+                endDrive(true)
+            }
+            CarRule.Act.DISCONNECTED -> note(this, "Android Auto disconnected")
+            CarRule.Act.NONE -> if (!connected && carRule.car) h?.postDelayed({ checkCar() }, carRule.grace + 500)
+        }
+    }
+
     /** Starts a drive with the car and place last picked on the Record screen. */
-    private fun autoStart() {
+    private fun autoStart(how: String) {
         val ui = getSharedPreferences("ui", 0)
         val c = st.car(ui.getString("car", "").orEmpty()) ?: st.cars().optJSONObject(0) ?: return
         val places = MainActivity.PLACES
-        startDrive(c.optString("id"), places[ui.getInt("place", 0).coerceIn(0, places.size - 1)], c.optString("tyre"), true)
+        startDrive(c.optString("id"), places[ui.getInt("place", 0).coerceIn(0, places.size - 1)], c.optString("tyre"), how)
     }
 
     override fun onProviderDisabled(p: String) {}
@@ -390,6 +448,7 @@ class RecService :
             h!!.post {
                 endDrive(discard)
                 runCatching { lm.removeUpdates(this) }
+                carWatch?.let { runCatching { unregisterReceiver(it) } }
                 if (svc === this) svc = null
                 t.quitSafely()
             }
@@ -417,6 +476,17 @@ class RecService :
 
         @Volatile @JvmField
         var lastError: String? = null
+
+        /** What automatic recording did and why, newest first, last 40 lines. */
+        @JvmStatic fun log(c: Context): String = c.getSharedPreferences("ui", 0).getString("autoLog", "").orEmpty()
+
+        @Synchronized
+        private fun note(c: Context, s: String) {
+            val stamp = SimpleDateFormat("d MMM HH:mm:ss", Locale.UK).format(Date())
+            val lines = ("$stamp  $s\n" + log(c)).split("\n").take(40)
+            c.getSharedPreferences("ui", 0).edit().putString("autoLog", lines.joinToString("\n", postfix = "\n")).apply()
+            Log.i("BUZZLAB", "AUTO $s")
+        }
 
         /** Save or discard the drive. Watching carries on; otherwise the service ends. Safe to call from any thread. */
         @JvmStatic fun endNow(discard: Boolean) {

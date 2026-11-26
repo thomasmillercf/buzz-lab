@@ -53,8 +53,8 @@ fun MainActivity.settings() {
         if (auto) {
             "Watching with GPS. Tap to turn off."
         } else {
-            "Starts when you're above ${RecService.START_MPH.toInt()} mph and saves after ${RecService.STOP_AFTER_MS / 60000} minutes stopped. " +
-                "Uses the car and phone position on Home."
+            "Starts when Android Auto connects, or once you're above ${RecService.START_MPH.toInt()} mph. Saves when Android Auto disconnects, " +
+                "or after ${RecService.STOP_AFTER_MS / 60000} minutes stopped. Uses the car and phone position on Home."
         },
     ) { autoToggle() }
     if (auto) ab.background = box(ON)
@@ -68,6 +68,12 @@ fun MainActivity.settings() {
         }
         val bb = button("Start again after a restart: ${if (on) "on" else "off"}", why) { bootToggle() }
         if (on) bb.background = box(ON)
+    }
+    if (auto || RecService.log(this).isNotEmpty()) {
+        button("Automatic recording log", "When it started and saved drives, and why") {
+            AlertDialog.Builder(this).setTitle("Automatic recording").setMessage(RecService.log(this).ifEmpty { "Nothing yet." })
+                .setPositiveButton("Close", null).show()
+        }
     }
     val free = getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(packageName)
     val bt = button(
@@ -102,9 +108,9 @@ private fun MainActivity.autoToggle() {
         toast("Add a car first.", true)
         return
     }
-    val msg = "Buzz Lab will watch your speed with GPS and record when you drive above ${RecService.START_MPH.toInt()} mph, as " +
+    val msg = "Buzz Lab will record when Android Auto connects, or when you drive above ${RecService.START_MPH.toInt()} mph, as " +
         "${carName(pref("car"))}, ${place()}. A notification stays while it's watching, and it uses some battery. " +
-        "It misses the first few seconds of each drive. After the phone restarts, open the app once to start watching again."
+        "With Android Auto it saves the drive within half a minute of the car turning off. After the phone restarts, open the app once to start watching again."
     AlertDialog.Builder(this).setTitle("Record automatically?").setMessage(msg).setPositiveButton("Turn on") { _, _ ->
         val need = ArrayList<String>()
         if (!has(Manifest.permission.ACCESS_FINE_LOCATION)) need += listOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)

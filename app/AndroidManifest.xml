@@ -1,4 +1,4 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="uk.buzzlab" android:versionCode="35" android:versionName="3.5">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="uk.buzzlab" android:versionCode="36" android:versionName="3.6">
   <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="36"/>
   <uses-permission android:name="android.permission.VIBRATE"/>
   <uses-permission android:name="android.permission.HIGH_SAMPLING_RATE_SENSORS"/>
@@ -14,6 +14,8 @@
   <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
   <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
   <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
+  <!-- Android Auto's connection state, for starting and saving drives automatically -->
+  <queries><provider android:authorities="androidx.car.app.connection" /></queries>
   <application android:label="Buzz Lab" android:debuggable="true" android:allowBackup="false" android:theme="@style/T" android:icon="@mipmap/ic_launcher" android:usesCleartextTraffic="false">
     <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop" android:configChanges="orientation|screenSize|uiMode|keyboardHidden">
       <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
