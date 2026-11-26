@@ -219,6 +219,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         SyncJob.schedule(this)
+        sendDeletes()
         if (tab == "home" && sub == null) {
             show("home")
         } else if (inSub && onSync) {

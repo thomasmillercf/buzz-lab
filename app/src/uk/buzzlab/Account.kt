@@ -143,7 +143,8 @@ fun MainActivity.offerRestore(quiet: Boolean) {
             if (!quiet) toast(problem(code, body), true)
             return@api
         }
-        val have = st.list().map { it.optString("id") }.toSet()
+        // drives deleted here and still waiting to be deleted on the server (ServerDelete.kt) don't come back
+        val have = st.list().map { it.optString("id") }.toSet() + pref("delQ").split(",")
         val all = runCatching { JSONObject(body).getJSONArray("drives").objects() }.getOrDefault(emptyList())
         val ids = all.filter { it.optBoolean("has_raw") && it.optString("id") !in have }.map { it.optString("id") }
         if (ids.isEmpty()) {

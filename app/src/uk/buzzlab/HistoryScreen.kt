@@ -113,8 +113,9 @@ private fun MainActivity.selectionBar(chosen: MutableSet<String>, every: List<JS
         if (SyncJob.ready(this)) icon(R.drawable.i_share, "Share selected") { shareThese(sel, "Vibration results", null) { history() } }
         icon(R.drawable.i_delete, "Delete selected") {
             val what = "${sel.size} ${if (sel.size == 1) "drive" else "drives"}"
-            ask("Delete $what from this phone? This can't be undone. Copies already on the server stay.") {
-                for (m in sel) st.delDrive(m.optString("id"))
+            val server = if (sel.any { onServer(it) }) " and the server" else ""
+            ask("Delete $what from this phone$server? This can't be undone.") {
+                deleteDrives(sel)
                 toast("Deleted ${sel.size}")
                 picked = null
                 show("analysis")

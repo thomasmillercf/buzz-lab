@@ -34,7 +34,7 @@ fun MainActivity.drive(m: JSONObject) {
     val id = m.optString("id")
     page(carName(m.optString("car"))) { history() }
     if (SyncJob.ready(this)) icon(R.drawable.i_share, "Share") { shareOne(m) }
-    val notOnServer = if (m.optString("syncedPos").isEmpty()) " It isn't on the server." else " The copy on the server stays."
+    val notOnServer = if (onServer(m)) " It's deleted from the server too." else ""
     overflow(
         linkedMapOf(
             "Feel it on the phone" to {
@@ -45,7 +45,7 @@ fun MainActivity.drive(m: JSONObject) {
             "Export" to { export(listOf(m)) },
             "Delete" to {
                 ask("Delete this drive? This can't be undone.$notOnServer") {
-                    st.delDrive(id)
+                    deleteDrives(listOf(m))
                     history()
                 }
             },
