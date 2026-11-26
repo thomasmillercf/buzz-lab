@@ -272,7 +272,7 @@ class SyncJob : JobService() {
                     progress(c, label, 0)
                     when (val code = post(c, "$url/api/upload", ui, zip, label)) {
                         200 -> {
-                            flag(st, m, "syncedPos", url)
+                            flagSynced(st, m, url)
                             ok++
                             log(c, "Sent drive $at of $total")
                         }
@@ -320,6 +320,20 @@ class SyncJob : JobService() {
                 st.saveMeta(JSONObject(Store.read(File(dir, "meta.json")).orEmpty()).put(key, value))
             } catch (e: Exception) {
                 Log.w("BUZZLAB", "flag $e")
+            }
+        }
+
+        /** Marks the drive synced only if its feel and note still match what was sent. */
+        private fun flagSynced(st: Store, sent: JSONObject, url: String) {
+            try {
+                val dir = st.driveDir(sent.getString("id"))
+                if (!dir.exists()) return
+                val now = JSONObject(Store.read(File(dir, "meta.json")).orEmpty())
+                val unchanged =
+                    now.optString("note") == sent.optString("note") && now.optJSONObject("feel")?.toString() == sent.optJSONObject("feel")?.toString()
+                if (unchanged) st.saveMeta(now.put("syncedPos", url))
+            } catch (e: Exception) {
+                Log.w("BUZZLAB", "flagSynced $e")
             }
         }
 

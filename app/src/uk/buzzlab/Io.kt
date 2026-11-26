@@ -37,6 +37,7 @@ object Io {
             for (m in drives) {
                 val id = m.getString("id")
                 val dir = st.driveDir(id)
+                if (File(dir, "acc.bin").length() == 0L) continue
                 val p = "drives/$id/"
                 index.put(m)
                 z.text(p + "meta.json", m.toString(1))

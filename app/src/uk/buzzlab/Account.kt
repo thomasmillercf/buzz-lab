@@ -130,6 +130,7 @@ fun MainActivity.finishSignIn(back: Uri) {
                 .remove("su").remove("sp").remove("pkce").remove("pkceUrl").putBoolean("welcomed", true).commit()
             toast("Signed in as ${o.optString("email")}", true)
             SyncJob.schedule(this)
+            if (isFinishing || isDestroyed) return@runOnUiThread
             settings()
             offerRestore(true)
         }
@@ -151,6 +152,7 @@ fun MainActivity.offerRestore(quiet: Boolean) {
             if (!quiet) toast("This phone already has every drive on the server.")
             return@api
         }
+        if (isFinishing || isDestroyed) return@api
         val n = if (ids.size == 1) "1 drive is" else "${ids.size} drives are"
         AlertDialog.Builder(this)
             .setMessage("$n on the server but not on this phone. Download them? Readings, routes and marks all come back.")
@@ -242,7 +244,10 @@ private fun MainActivity.endSession(wipe: Boolean) {
             }
         }
     }
-    getSystemService(JobScheduler::class.java).cancel(SyncJob.ID)
+    getSystemService(JobScheduler::class.java).run {
+        cancel(SyncJob.ID)
+        cancel(SyncJob.USER)
+    }
     ui.edit().remove("url").remove("tok").remove("email").remove("su").remove("sp").commit()
     if (wipe) {
         for (m in st.list()) st.delDrive(m.optString("id"))

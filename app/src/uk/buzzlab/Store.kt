@@ -59,9 +59,13 @@ class Store(@JvmField val dir: File) {
         @JvmStatic
         @Throws(java.io.IOException::class)
         fun write(f: File, s: String) {
-            val tmp = File(f.path + ".tmp")
-            tmp.writeText(s)
-            Files.move(tmp.toPath(), f.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            val tmp = File.createTempFile(f.name, ".tmp", f.parentFile)
+            try {
+                tmp.writeText(s)
+                Files.move(tmp.toPath(), f.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+            } finally {
+                tmp.delete()
+            }
         }
 
         /** "275/50R20" to rolling distance in metres (unloaded circumference x 0.97); 0 when not understood. */

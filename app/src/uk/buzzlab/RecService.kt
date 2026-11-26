@@ -79,6 +79,8 @@ class RecService :
     @Volatile private var pauseAt = 0L
 
     @Volatile private var closed = true
+
+    @Volatile private var lastFixAt = 0L
     private var lastFix = 0L
     private var pauses = 0
     private var acc: DataOutputStream? = null
@@ -202,6 +204,7 @@ class RecService :
             charts = Live()
             slowSince = 0
             startMs = System.currentTimeMillis()
+            lastFixAt = startMs
             val did = startMs.toString()
             val d = st.driveDir(did).apply { mkdirs() }
             meta = JSONObject().put("id", did).put("start", startMs).put("car", car).put("place", place).put("note", "").put("tyre", tyre)
@@ -232,12 +235,14 @@ class RecService :
                     }
                 },
             )
+            if (byItself) stopWhenGpsLost()
             gpsRate()
             refresh()
         } catch (e: Exception) {
             error = e.toString()
             lastError = e.message.toString()
             Log.e("BUZZLAB", "REC fail", e)
+            live = this
             endDrive(true)
         }
     }
@@ -260,8 +265,28 @@ class RecService :
 
     override fun onAccuracyChanged(s: Sensor?, a: Int) {}
 
+    /** A drive that started by itself ends once GPS has been silent for NO_GPS_MS, e.g. parked underground. */
+    private fun stopWhenGpsLost() {
+        val handler = h ?: return
+        handler.postDelayed(
+            object : Runnable {
+                override fun run() {
+                    if (closed || live !== this@RecService) return
+                    if (!paused && System.currentTimeMillis() - lastFixAt > NO_GPS_MS) {
+                        Log.i("BUZZLAB", "AUTO lost GPS, saving")
+                        endDrive(false)
+                        return
+                    }
+                    handler.postDelayed(this, GPS_CHECK_MS)
+                }
+            },
+            GPS_CHECK_MS,
+        )
+    }
+
     override fun onLocationChanged(l: Location) {
         val now = System.currentTimeMillis()
+        lastFixAt = now
         val v = if (l.hasSpeed()) l.speed * Dsp.MPH else Double.NaN
         if (!paused || live == null) mph = v
         if (v >= STOP_MPH) lastMoving = now
@@ -277,7 +302,7 @@ class RecService :
             val bearing = if (l.hasBearing()) l.bearing.toString() else ""
             gps?.println("${l.elapsedRealtimeNanos},${l.latitude},${l.longitude},$speed,${l.accuracy},$bearing")
             if (auto) {
-                if (v < STOP_MPH) {
+                if (!(v >= STOP_MPH)) {
                     if (slowSince == 0L) {
                         slowSince = now
                     } else if (now - slowSince > STOP_AFTER_MS) {
@@ -349,16 +374,20 @@ class RecService :
         closed = true
         lt?.quitSafely()
         val app = applicationContext
+        sm.unregisterListener(this)
+        for (stream in listOf(acc, gps, marks)) {
+            runCatching { stream?.close() }.onFailure { error = error ?: "Storage: ${it.message}" }
+        }
         try {
-            sm.unregisterListener(this)
-            acc?.close()
-            gps?.close()
-            marks?.close()
-            val m = meta
-            if (m != null && discard) {
-                st.delDrive(m.getString("id"))
+            val started = meta
+            if (started != null && discard) {
+                st.delDrive(started.getString("id"))
                 Log.i("BUZZLAB", "REC discarded")
-            } else if (m != null) {
+            } else if (started != null) {
+                val dir = st.driveDir(started.getString("id"))
+                File(dir, "stats.json").delete()
+                File(dir, "trip.json").delete()
+                val m = Store.read(File(dir, "meta.json"))?.let { runCatching { JSONObject(it) }.getOrNull() } ?: started
                 m.put("recording", false).put("end", System.currentTimeMillis()).put("pauses", pauses).put("paused_s", pausedNow() / 1000)
                     .put("samples", samples).put("fixes", fixes)
                 error?.let { m.put("error", it) }
@@ -408,6 +437,7 @@ class RecService :
         const val START_FIXES = 3
         const val STOP_AFTER_MS = 180_000L
         const val NO_GPS_MS = 300_000L
+        const val GPS_CHECK_MS = 30_000L
 
         @Volatile @JvmField
         var live: RecService? = null
