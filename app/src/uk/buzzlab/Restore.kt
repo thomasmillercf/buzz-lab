@@ -44,7 +44,9 @@ object Restore {
                     val m = JSONObject(z.readBytes().decodeToString())
                     val id = m.getString("id")
                     if (id != p[1] || !id.all { it.isDigit() } || id.length !in 10..16) throw IOException("a drive has a bad id")
-                    if (st.driveDir(id).exists()) throw IOException("already on this phone")
+                    val existing = st.driveDir(id)
+                    if (File(existing, "meta.json").exists()) throw IOException("already on this phone")
+                    existing.deleteRecursively()
                     meta = m
                     base = m.optLong("start", id.toLong()) * 1_000_000L
                     dir = st.driveDir(id).apply { mkdirs() }

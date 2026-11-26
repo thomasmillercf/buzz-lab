@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"math"
 	"net"
@@ -101,6 +102,9 @@ CREATE INDEX IF NOT EXISTS drives_car ON drives(car,start);` + shareSchema + ses
 	if _, e := db.Exec(`ALTER TABLE drives ADD COLUMN feel TEXT NOT NULL DEFAULT ''`); e != nil && !strings.Contains(e.Error(), "duplicate column") {
 		return nil, e
 	}
+	if _, e := db.Exec(`ALTER TABLE shares ADD COLUMN wrong_pins INTEGER NOT NULL DEFAULT 0`); e != nil && !strings.Contains(e.Error(), "duplicate column") {
+		return nil, e
+	}
 	return db, nil
 }
 
@@ -155,15 +159,28 @@ func (s *server) auth(h http.Handler) http.Handler {
 	})
 }
 
-// clientIP trusts the last X-Forwarded-For entry only when the direct peer is private (the reverse proxy).
+// trustedProxy, when set, is the only peer whose X-Forwarded-For is believed; unset, any private or loopback peer is.
+var trustedProxy = os.Getenv("BUZZ_PROXY")
+
+// clientIP gives the address rate limits key on, with IPv6 cut to its /64 so one network can't rotate through addresses.
 func clientIP(r *http.Request) string {
 	host, _, _ := net.SplitHostPort(r.RemoteAddr)
-	if ip := net.ParseIP(host); ip != nil && (ip.IsPrivate() || ip.IsLoopback()) {
+	if isTrustedProxy(host) {
 		if x := strings.Split(r.Header.Get("X-Forwarded-For"), ","); strings.TrimSpace(x[len(x)-1]) != "" {
-			return strings.TrimSpace(x[len(x)-1])
+			host = strings.TrimSpace(x[len(x)-1])
 		}
 	}
+	if ip := net.ParseIP(host); ip != nil && ip.To4() == nil {
+		return ip.Mask(net.CIDRMask(64, 128)).String() + "/64"
+	}
 	return host
+}
+func isTrustedProxy(host string) bool {
+	if trustedProxy != "" {
+		return host == trustedProxy
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && (ip.IsPrivate() || ip.IsLoopback())
 }
 func (s *server) recent(ip string) []time.Time {
 	var k []time.Time
@@ -183,7 +200,11 @@ func (s *server) note(ip string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(s.fails) > 5000 {
-		s.fails = map[string][]time.Time{}
+		for k := range s.fails {
+			if len(s.recent(k)) == 0 {
+				delete(s.fails, k)
+			}
+		}
 	}
 	s.fails[ip] = append(s.recent(ip), time.Now())
 }
@@ -231,6 +252,13 @@ func (s *server) upload(w http.ResponseWriter, r *http.Request) {
 		if err := os.Rename(tmp.Name(), s.raw(ids[0])); err != nil {
 			fail(w, 500, "storage")
 			return
+		}
+	} else {
+		for _, id := range ids {
+			if err := os.Remove(s.raw(id)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				fail(w, 500, "storage")
+				return
+			}
 		}
 	}
 	writeJSON(w, 200, map[string]any{"saved": ids})
@@ -576,8 +604,15 @@ func (s *server) cars(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var c car
 		var n int
-		rows.Scan(&c.ID, &c.Name, &c.Tyre, &n)
+		if err := rows.Scan(&c.ID, &c.Name, &c.Tyre, &n); err != nil {
+			fail(w, 500, "database")
+			return
+		}
 		out = append(out, map[string]any{"id": c.ID, "name": c.Name, "tyre": c.Tyre, "drives": n})
+	}
+	if rows.Err() != nil {
+		fail(w, 500, "database")
+		return
 	}
 	writeJSON(w, 200, map[string]any{"cars": out})
 }
@@ -717,7 +752,10 @@ func (s *server) del(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, "database")
 		return
 	}
-	os.Remove(s.raw(id))
+	if err := os.Remove(s.raw(id)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		fail(w, 500, "storage")
+		return
+	}
 	if n, _ := x.RowsAffected(); n == 0 {
 		fail(w, 404, "no such drive")
 		return

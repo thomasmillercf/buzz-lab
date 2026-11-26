@@ -8,22 +8,26 @@ import org.json.JSONObject
  */
 
 private const val Q = "delQ"
+private const val Q_SERVER = "delQUrl"
 
-private fun MainActivity.queued(): MutableSet<String> = ui.getString(Q, "").orEmpty().split(",").filter { it.isNotEmpty() }.toMutableSet()
+private fun MainActivity.queued(): MutableSet<String> {
+    val server = ui.getString(Q_SERVER, null)
+    if (server != null && server != url()) return mutableSetOf()
+    return ui.getString(Q, "").orEmpty().split(",").filter { it.isNotEmpty() }.toMutableSet()
+}
 
 private fun MainActivity.setQueued(s: Set<String>) {
-    ui.edit().putString(Q, s.joinToString(",")).apply()
+    ui.edit().putString(Q, s.joinToString(",")).putString(Q_SERVER, url()).commit()
 }
 
 /** True if the server holds (or may hold) a copy of this drive. */
 fun MainActivity.onServer(m: JSONObject) = SyncJob.ready(this) && m.optString("syncedPos").isNotEmpty()
 
-/** Deletes the drives from the phone, and from the server where it has them. */
+/** Deletes the drives from the phone and from the server; a drive the server never got just comes back 404. */
 fun MainActivity.deleteDrives(ms: List<JSONObject>) {
-    val remote = ms.filter { onServer(it) }.map { it.optString("id") }
-    for (m in ms) st.delDrive(m.optString("id"))
-    if (remote.isEmpty()) return
-    setQueued(queued() + remote)
+    val ids = ms.map { it.optString("id") }
+    if (SyncJob.ready(this)) setQueued(queued() + ids)
+    for (id in ids) st.delDrive(id)
     sendDeletes()
 }
 

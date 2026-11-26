@@ -21,6 +21,9 @@ import (
 //go:embed share.html
 var sharePage string
 
+// maxWrongPins locks a link for good, so a PIN can't be guessed slowly over the link's lifetime.
+const maxWrongPins = 20
+
 const shareSchema = `CREATE TABLE IF NOT EXISTS shares(id INTEGER PRIMARY KEY,token TEXT NOT NULL UNIQUE,title TEXT NOT NULL,drives TEXT NOT NULL,created INTEGER NOT NULL,expires INTEGER NOT NULL,salt TEXT NOT NULL DEFAULT '',pin TEXT NOT NULL DEFAULT '',opens INTEGER NOT NULL DEFAULT 0);`
 
 type share struct {
@@ -168,7 +171,7 @@ func (s *server) shareFind(tok string) (*share, bool) {
 	var h share
 	var ds string
 	var e int64
-	if len(tok) != 43 || s.db.QueryRow(`SELECT id,title,drives,expires,salt,pin,view,route FROM shares WHERE token=? AND expires>?`, hashToken(tok), time.Now().UnixMilli()).Scan(&h.ID, &h.Title, &ds, &e, &h.salt, &h.pin, &h.view, &h.Route) != nil {
+	if len(tok) != 43 || s.db.QueryRow(`SELECT id,title,drives,expires,salt,pin,view,route FROM shares WHERE token=? AND expires>? AND wrong_pins<?`, hashToken(tok), time.Now().UnixMilli(), maxWrongPins).Scan(&h.ID, &h.Title, &ds, &e, &h.salt, &h.pin, &h.view, &h.Route) != nil {
 		return nil, false
 	}
 	json.Unmarshal([]byte(ds), &h.Drives)
@@ -287,6 +290,10 @@ func (s *server) shareData(w http.ResponseWriter, r *http.Request) {
 		if subtle.ConstantTimeCompare([]byte(hashPin(q.Pin, h.salt)), []byte(h.pin)) != 1 {
 			s.note(key)
 			s.note(ip)
+			if _, err := s.db.Exec(`UPDATE shares SET wrong_pins=wrong_pins+1 WHERE id=?`, h.ID); err != nil {
+				fail(w, 500, "database")
+				return
+			}
 			fail(w, 401, "wrong pin")
 			return
 		}
