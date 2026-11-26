@@ -59,6 +59,17 @@ class DspTest {
     }
 
     @Test
+    fun `feel bands give the buzz rate and strength for each 10 mph`() {
+        val b = bands(analysed(mph = 44.0, hz = 37.0))
+        assertEquals(1, b.size, "only 40 to 50 mph has driving")
+        assertEquals(40, b[0].lo)
+        assertEquals(37, b[0].rate)
+        assertEquals(.5 / sqrt(2.0), b[0].level, .05)
+        assertTrue(b[0].secs >= 6)
+        assertTrue(bands(Dsp()).isEmpty())
+    }
+
+    @Test
     fun `the frequency follows the source, not the speed`() {
         for (mph in listOf(25.0, 55.0)) {
             val d = analysed(mph = mph, hz = 42.0)

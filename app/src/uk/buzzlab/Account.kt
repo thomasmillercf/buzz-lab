@@ -118,31 +118,68 @@ fun MainActivity.finishSignIn(back: Uri) {
     }
 }
 
-/** Back to offline only: drives stay on the phone and nothing more is sent. */
+/** Back to offline only. Asks whether to keep this phone's drives, or delete them too. Copies on the server stay. */
 fun MainActivity.signOut() {
+    val n = st.list().size
+    val notUp = st.list().count { !it.optBoolean("recording") && it.optString("syncedPos") != url() }
+    val b = AlertDialog.Builder(this)
+        .setTitle("Sign out")
+        .setMessage(
+            "Nothing more is uploaded after this. Drives already on the server stay there." +
+                if (n > 0) "\n\nKeep the $n ${if (n == 1) "drive" else "drives"} on this phone, or delete ${if (n == 1) "it" else "them"}?" else "",
+        )
+        .setPositiveButton(if (n > 0) "Keep on phone" else "Sign out") { _, _ -> endSession(false) }
+        .setNegativeButton("Cancel", null)
+    if (n > 0) b.setNeutralButton("Delete from phone") { _, _ -> confirmWipe(n, notUp) }
+    b.show()
+}
+
+private fun MainActivity.confirmWipe(n: Int, notUp: Int) {
+    if (RecService.live != null) {
+        toast("A drive is recording. Stop it first, then sign out.", true)
+        return
+    }
+    val lost = if (notUp >
+        0
+    ) {
+        " $notUp of them ${if (notUp == 1) "isn't" else "aren't"} on the server and will be lost for good."
+    } else {
+        " They're all on the server."
+    }
     AlertDialog.Builder(this)
-        .setMessage("Sign out? Drives stay on this phone and nothing more is uploaded. Drives already on the server stay there.")
-        .setPositiveButton("Sign out") { _, _ ->
-            val base = url()
-            val tok = pref("tok")
-            thread {
-                runCatching {
-                    val h = URL("$base/auth/app/signout").openConnection() as HttpURLConnection
-                    h.connectTimeout = 10000
-                    h.readTimeout = 10000
-                    h.requestMethod = "POST"
-                    h.setRequestProperty("Authorization", "Bearer $tok")
-                    h.responseCode
-                    h.disconnect()
-                }
-            }
-            getSystemService(JobScheduler::class.java).cancel(SyncJob.ID)
-            ui.edit().remove("url").remove("tok").remove("email").remove("su").remove("sp").commit()
-            toast("Signed out. Offline only.")
-            settings()
-        }
-        .setNegativeButton("Stay signed in", null)
+        .setMessage("Delete all $n drives and your cars from this phone?$lost This can't be undone. Calibration is kept.")
+        .setPositiveButton("Delete and sign out") { _, _ -> endSession(true) }
+        .setNegativeButton("Cancel", null)
         .show()
+}
+
+private fun MainActivity.endSession(wipe: Boolean) {
+    val base = url()
+    val tok = pref("tok")
+    if (tok.isNotEmpty()) {
+        thread {
+            runCatching {
+                val h = URL("$base/auth/app/signout").openConnection() as HttpURLConnection
+                h.connectTimeout = 10000
+                h.readTimeout = 10000
+                h.requestMethod = "POST"
+                h.setRequestProperty("Authorization", "Bearer $tok")
+                h.responseCode
+                h.disconnect()
+            }
+        }
+    }
+    getSystemService(JobScheduler::class.java).cancel(SyncJob.ID)
+    ui.edit().remove("url").remove("tok").remove("email").remove("su").remove("sp").commit()
+    if (wipe) {
+        for (m in st.list()) st.delDrive(m.optString("id"))
+        for (c in st.cars().objects()) st.delCar(c.optString("id"))
+        toast("Signed out. Drives and cars deleted from this phone.", true)
+        show("home")
+    } else {
+        toast("Signed out. Offline only.")
+        settings()
+    }
 }
 
 /**

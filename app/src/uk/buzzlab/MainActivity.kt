@@ -19,7 +19,6 @@ import android.view.View
 import android.view.ViewTreeObserver
 import android.view.WindowManager
 import android.widget.Button
-import android.widget.CheckBox
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -82,7 +81,6 @@ class MainActivity : Activity() {
     @Volatile var cancel = false
     var playing: AudioTrack? = null
     var lit: Button? = null
-    var spk: CheckBox? = null
     var clips = JSONObject()
     var replayLast: (() -> Unit)? = null
 

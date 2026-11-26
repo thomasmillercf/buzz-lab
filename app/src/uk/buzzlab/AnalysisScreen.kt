@@ -66,6 +66,10 @@ fun MainActivity.analysis() {
     }
     val where = if (ap == 0) "any phone position" else MainActivity.PLACES[ap - 1]
     button("${MainActivity.DATES[ui.getInt("dr", 0)]}, ${SPEEDS[ui.getInt("sr", 0)]}, $where$how  ▾") { filters() }.textSize = 14f
+    button("Feel it on the phone", "Play this buzz at each speed, through the motor") {
+        ui.edit().remove("fdrive").apply()
+        show("feel")
+    }
     val stv = text("Working...", 15)
     status = stv
     val (lo, hi) = SPEED_RANGES[ui.getInt("sr", 0)]
@@ -123,7 +127,7 @@ private fun MainActivity.shareAnalysis() {
 }
 
 /** Drives of a car that pass the date, phone position and start choices on Analysis. */
-private fun MainActivity.matching(c: JSONObject): List<JSONObject> {
+fun MainActivity.matching(c: JSONObject): List<JSONObject> {
     val from = since(ui.getInt("dr", 0))
     val ap = ui.getInt("ap", 0)
     val ah = ui.getInt("ah", 0)
@@ -137,7 +141,7 @@ private fun MainActivity.matching(c: JSONObject): List<JSONObject> {
 }
 
 /** Adds up the matching drives; n[at] counts the ones that could be read. */
-private fun MainActivity.sum(c: JSONObject, n: IntArray, at: Int): Dsp {
+fun MainActivity.sum(c: JSONObject, n: IntArray, at: Int): Dsp {
     val d = Dsp()
     for (m in matching(c)) {
         try {

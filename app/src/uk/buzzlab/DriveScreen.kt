@@ -37,6 +37,10 @@ fun MainActivity.drive(m: JSONObject) {
     val notOnServer = if (m.optString("syncedPos").isEmpty()) " It isn't on the server." else " The copy on the server stays."
     overflow(
         linkedMapOf(
+            "Feel it on the phone" to {
+                ui.edit().putString("fdrive", id).apply()
+                show("feel")
+            },
             "How it felt" to { rate(m) { findDrive(id)?.let { drive(it) } ?: history() } },
             "Export" to { export(listOf(m)) },
             "Delete" to {
