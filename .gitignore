@@ -1,5 +1,6 @@
 .keys/
 out/
+out-test/
 *.env
 *.ks
 *.apk

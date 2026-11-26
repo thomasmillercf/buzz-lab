@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -257,5 +258,83 @@ func TestShares(t *testing.T) {
 	s.db.Exec(`UPDATE shares SET expires=1`)
 	if c := do(h, "POST", q+"/data", []byte(`{"pin":"4821"}`), "", "").Code; c != 404 {
 		t.Fatal("expired link works", c)
+	}
+}
+func TestPinLocksLinkAfterTooManyWrong(t *testing.T) {
+	s, h := mk(t)
+	do(h, "POST", "/api/upload", export("1700000000000", 10, .04), "u", pw)
+	var r struct{ Path string }
+	json.Unmarshal(do(h, "POST", "/api/shares", []byte(`{"title":"Pin","drives":["1700000000000"],"days":5,"pin":"4821"}`), "u", pw).Body.Bytes(), &r)
+	for i := 0; i < 20; i++ {
+		s.fails = map[string][]time.Time{}
+		do(h, "POST", r.Path+"/data", []byte(`{"pin":"0000"}`), "", "")
+	}
+	s.fails = map[string][]time.Time{}
+	if c := do(h, "POST", r.Path+"/data", []byte(`{"pin":"4821"}`), "", "").Code; c != 404 {
+		t.Fatal("link still open after 20 wrong PINs", c)
+	}
+}
+func TestFullFailMapKeepsLiveLockouts(t *testing.T) {
+	s, _ := mk(t)
+	old := time.Now().Add(-time.Hour)
+	for i := 0; i <= 5000; i++ {
+		s.fails[strconv.Itoa(i)] = []time.Time{old}
+	}
+	for i := 0; i < 10; i++ {
+		s.note("attacker")
+	}
+	s.note("someone")
+	if !s.blocked("attacker") {
+		t.Fatal("lockout dropped when the map filled")
+	}
+	if len(s.fails) != 2 {
+		t.Fatal("stale entries kept", len(s.fails))
+	}
+}
+func TestClientIPGroupsIPv6ByNetwork(t *testing.T) {
+	r := httptest.NewRequest("GET", "/", nil)
+	r.RemoteAddr = "[2001:db8:1:2:aaaa::1]:5000"
+	if ip := clientIP(r); ip != "2001:db8:1:2::/64" {
+		t.Fatal(ip)
+	}
+	r.RemoteAddr = "172.17.0.1:5000"
+	r.Header.Set("X-Forwarded-For", "203.0.113.9")
+	if ip := clientIP(r); ip != "203.0.113.9" {
+		t.Fatal(ip)
+	}
+	trustedProxy = "10.0.0.5"
+	t.Cleanup(func() { trustedProxy = "" })
+	if ip := clientIP(r); ip != "172.17.0.1" {
+		t.Fatal("forwarded header trusted from an unknown peer", ip)
+	}
+}
+func TestBatchUploadDropsOldRawReadings(t *testing.T) {
+	s, h := mk(t)
+	do(h, "POST", "/api/upload", export("1700000000000", 10, .04), "u", pw)
+	if _, err := os.Stat(s.raw("1700000000000")); err != nil {
+		t.Fatal("single upload kept no raw readings")
+	}
+	var b bytes.Buffer
+	z := zip.NewWriter(&b)
+	seen := map[string]bool{}
+	for _, one := range [][]byte{export("1700000000000", 10, .04), export("1700001000000", 10, .04)} {
+		in, _ := zip.NewReader(bytes.NewReader(one), int64(len(one)))
+		for _, f := range in.File {
+			if seen[f.Name] {
+				continue
+			}
+			seen[f.Name] = true
+			w, _ := z.Create(f.Name)
+			rc, _ := f.Open()
+			io.Copy(w, rc)
+			rc.Close()
+		}
+	}
+	z.Close()
+	if c := do(h, "POST", "/api/upload", b.Bytes(), "u", pw).Code; c != 200 {
+		t.Fatal(c)
+	}
+	if _, err := os.Stat(s.raw("1700000000000")); !os.IsNotExist(err) {
+		t.Fatal("old raw readings kept after a batch re-send")
 	}
 }
