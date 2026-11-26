@@ -9,8 +9,11 @@ import java.io.File
 import java.io.FileInputStream
 import kotlin.math.PI
 import kotlin.math.cos
+import kotlin.math.floor
+import kotlin.math.ln
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
@@ -26,6 +29,9 @@ class Dsp {
 
     @JvmField val n = IntArray(NB)
 
+    /** For each speed bin, how many windows fell in each strength step at 20 to 50 Hz. Shows spread, not just the average. */
+    @JvmField val h = Array(NB) { IntArray(NH) }
+
     @JvmField var maxMph = 0.0
 
     @JvmField var km = 0.0
@@ -35,6 +41,7 @@ class Dsp {
             n[b] += o.n[b]
             for (f in 0 until NF) psd[b][f] += o.psd[b][f]
             for (a in 0 until 3) ax[b][a] += o.ax[b][a]
+            for (k in 0 until NH) h[b][k] += o.h[b][k]
         }
         maxMph = max(maxMph, o.maxMph)
         km += o.km
@@ -44,7 +51,9 @@ class Dsp {
         val counts = JSONArray()
         val spectra = JSONArray()
         val axes = JSONArray()
+        val hist = JSONArray()
         for (b in 0 until NB) {
+            hist.put(JSONArray().apply { h[b].forEach { put(it) } })
             counts.put(n[b])
             val p = JSONArray()
             val q = JSONArray()
@@ -55,7 +64,7 @@ class Dsp {
             spectra.put(p)
             axes.put(q)
         }
-        return JSONObject().put("v", 2).put("n", counts).put("psd", spectra).put("ax", axes)
+        return JSONObject().put("v", V).put("n", counts).put("psd", spectra).put("ax", axes).put("h", hist)
             .put("maxMph", maxMph).put("km", km)
     }
 
@@ -75,6 +84,29 @@ class Dsp {
     }
 
     fun count(lo: Int, hi: Int): Int = bins(lo, hi).sumOf { n[it] }
+
+    /** Windows in speed bin b with spread counted. Drives analysed before spread was kept have none. */
+    fun spreadCount(b: Int): Int = h[b].sum()
+
+    /**
+     * The q-th share (0 to 1) of window strengths at 20 to 50 Hz in speed bin b, in m/s²; NaN when there are none.
+     * Read off the steps, interpolating within one on a log scale.
+     */
+    fun pct(b: Int, q: Double): Double {
+        val total = spreadCount(b)
+        if (total == 0) return Double.NaN
+        val want = q * total
+        var c = 0.0
+        for (k in 0 until NH) {
+            if (h[b][k] == 0) continue
+            if (c + h[b][k] >= want) {
+                val frac = ((want - c) / h[b][k]).coerceIn(0.0, 1.0)
+                return hEdge(k) * 2.0.pow(frac / HPO)
+            }
+            c += h[b][k]
+        }
+        return hEdge(NH)
+    }
 
     /** Share of 25 to 35 Hz along the phone's length. */
     fun foreAft(lo: Int, hi: Int): Double {
@@ -96,6 +128,18 @@ class Dsp {
         const val NF = F1 - F0 + 1
         const val NB = 16
         const val MPH = 2.23694
+
+        /** Stats layout version; older caches are worked out again when the raw readings are there. */
+        const val V = 3
+
+        /** Spread steps: HPO per doubling, from H_LO m/s² up. Values outside go in the end steps. */
+        const val NH = 24
+        private const val HPO = 3
+        private const val H_LO = .01
+
+        @JvmStatic fun hEdge(k: Int): Double = H_LO * 2.0.pow(k.toDouble() / HPO)
+
+        @JvmStatic fun hBin(r: Double): Int = if (r <= H_LO) 0 else min(NH - 1, floor(HPO * ln(r / H_LO) / ln(2.0)).toInt())
 
         /** Speed bins wholly inside lo..hi mph. */
         private fun bins(lo: Int, hi: Int) = (0 until NB).filter { it * 5 >= lo && it * 5 + 5 <= hi }
@@ -125,20 +169,29 @@ class Dsp {
                 if (d.n[b] > 0 && p.length() != NF) throw JSONException("older stats")
                 for (f in 0 until p.length()) d.psd[b][f] = p.getDouble(f)
                 for (a in 0 until q.length()) d.ax[b][a] = q.getDouble(a)
+                o.optJSONArray("h")?.optJSONArray(b)?.let { hb -> for (k in 0 until min(NH, hb.length())) d.h[b][k] = hb.getInt(k) }
             }
             d.maxMph = o.optDouble("maxMph")
             d.km = o.optDouble("km")
             return d
         }
 
-        /** Cached stats if they're current, else worked out from the raw files and cached. */
+        /**
+         * Cached stats if they're current, else worked out from the raw files and cached.
+         * An older cache is used as it is when the raw readings can't be read again.
+         */
         @JvmStatic
         @Throws(Exception::class)
         fun load(dir: File): Dsp {
             val cache = File(dir, "stats.json")
-            Store.read(cache)?.let { runCatching { return from(JSONObject(it)) } }
-            val r = raw(dir)
-            return analyse(r.t, r.v, r.gps).also { Store.write(cache, it.json().toString()) }
+            val old = Store.read(cache)?.let { runCatching { JSONObject(it) }.getOrNull() }
+            if (old != null && old.optInt("v") >= V) runCatching { return from(old) }
+            return try {
+                val r = raw(dir)
+                analyse(r.t, r.v, r.gps).also { Store.write(cache, it.json().toString()) }
+            } catch (x: Exception) {
+                old?.let { runCatching { from(it) }.getOrNull() } ?: throw x
+            }
         }
 
         @JvmStatic
@@ -228,7 +281,12 @@ class Dsp {
                     }
                     o += seg / 2
                 }
-                for (f in 0 until NF) d.psd[b][f] += p[f] / segments
+                var band = 0.0
+                for (f in 0 until NF) {
+                    d.psd[b][f] += p[f] / segments
+                    if (F0 + f in 20 until 50) band += p[f] / segments
+                }
+                d.h[b][hBin(sqrt(band))]++
                 for (a in 0 until 3) d.ax[b][a] += pa[a] / segments
                 d.n[b]++
             }

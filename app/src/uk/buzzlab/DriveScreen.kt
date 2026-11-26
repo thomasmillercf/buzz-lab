@@ -16,6 +16,7 @@ import uk.buzzlab.MainActivity.Companion.NAV
 import java.io.File
 import java.util.Locale
 import kotlin.concurrent.thread
+import kotlin.math.max
 
 /** Speed ranges asked about after a drive. */
 private val FEEL_RANGES = listOf(10 to 30, 30 to 50, 50 to 80)
@@ -133,7 +134,14 @@ fun MainActivity.stats(d: Dsp, other: Dsp?, otherName: String?, tyre: String, lo
     list.addView(hm)
     note(
         "Brighter means stronger. From 0 to 0.35 m/s²/√Hz, or doubling from 0.005 to 0.32 with log strength on. Frequency is on a log scale." +
-            (if (c > 0) " The white line is once per wheel turn." else " Add a tyre size for the wheel-turn line.") +
+            (
+                if (c > 0) {
+                    " The solid white line is once per wheel turn, the dashed one twice. Something that follows a line comes from the" +
+                        " wheels or tyres; a level band that stays at one frequency whatever the speed is a resonance."
+                } else {
+                    " Add a tyre size for the wheel-turn lines."
+                }
+                ) +
             " Lightly smoothed to cut speckle. Columns need 6 seconds of steady driving.",
     )
     heading("Average spectrum")
@@ -162,6 +170,7 @@ fun MainActivity.stats(d: Dsp, other: Dsp?, otherName: String?, tyre: String, lo
         s.append('\n')
     }
     text(s.toString(), 15).typeface = Typeface.MONOSPACE
+    spread(d, other, otherName)
     if (c > 0) note(String.format(Locale.UK, "Wheel turns: %.1f Hz at 30 mph, %.1f at 50, %.1f at 70.", 30 / Dsp.MPH / c, 50 / Dsp.MPH / c, 70 / Dsp.MPH / c))
 }
 
@@ -243,5 +252,28 @@ private fun MainActivity.feelForm(m: JSONObject, d: Dsp?, w: TextView, after: ()
             runCatching { findDrive(m.optString("id"))?.let { st.saveMeta(it.put("feelSkipped", true)) } }
             after()
         },
+    )
+}
+
+/** How much 20 to 50 Hz varies from one 2 s window to the next, by speed, with a line of text saying how steady it is. */
+private fun MainActivity.spread(d: Dsp, other: Dsp?, otherName: String?) {
+    heading("Spread at 20 to 50 Hz")
+    val used = (0 until Dsp.NB).filter { d.spreadCount(it) >= Charts.Spread.MIN }
+    if (used.isEmpty()) {
+        note("Not enough steady driving yet. Drives recorded before this version are worked out again the first time they're opened.")
+        return
+    }
+    list.addView(Charts.Spread(this, d, other, MU))
+    val ratios = used.map { d.pct(it, .9) / max(1e-6, d.pct(it, .1)) }.sorted()
+    val r = ratios[ratios.size / 2]
+    val how = when {
+        r < 2 -> "fairly steady: it's there most of the time at these speeds"
+        r < 4 -> "variable: it comes and goes with the road"
+        else -> "very variable: mostly quiet, with strong bursts"
+    }
+    note(
+        "Bars run from the quietest 10% to the strongest 10% of 2 s windows; the white tick is the middle. " +
+            String.format(Locale.UK, "Typically the strong windows are %.1f times the quiet ones, so it is %s.", r, how) +
+            (if (other == null) "" else " Grey: $otherName."),
     )
 }

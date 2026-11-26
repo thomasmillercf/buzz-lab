@@ -3,6 +3,7 @@ package uk.buzzlab
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
+import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.Path
 import android.view.View
@@ -15,7 +16,7 @@ import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
-/** Heat map (speed by frequency), spectrum, speed and bar charts, drawn to scale. */
+/** Heat map (speed by frequency), spectrum, spread, speed and bar charts, drawn to scale. */
 object Charts {
     /** One orange ramp on navy: dark is near zero, bright is strong. */
     private val RAMP = longArrayOf(0xFF062B3F, 0xFF4A2430, 0xFF8E2A1A, 0xFFD4320F, 0xFFF95A26, 0xFFFF8F4D, 0xFFFFD9B8).map { it.toInt() }
@@ -88,7 +89,7 @@ object Charts {
 
     private fun pen(dp: Float) = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 12 * dp }
 
-    /** Speed across, frequency up, brightness for strength. The white curve is once per wheel turn. */
+    /** Speed across, frequency up, brightness for strength. White curves are once (solid) and twice (dashed) per wheel turn. */
     @SuppressLint("ViewConstructor")
     class Heat(c: Context, @JvmField var d: Dsp, private val circ: Double, @Suppress("unused") dark: Boolean, private val mu: Int) : View(c) {
         @JvmField var log = false
@@ -126,18 +127,100 @@ object Charts {
                 p.color = 0xFFF2F0EA.toInt()
                 p.strokeWidth = 2.5f * dp
                 p.style = Paint.Style.STROKE
-                val f1 = lo * 5 / Dsp.MPH / circ
-                val f2 = hi * 5 / Dsp.MPH / circ
-                val q = Path()
-                for (k in 0..40) {
-                    val f = f1 + (f2 - f1) * k / 40
-                    if (f < 2) continue
-                    val x = left + w * k / 40
-                    val y = min(top + h, ly(f, top, h))
-                    if (q.isEmpty) q.moveTo(x, y) else q.lineTo(x, y)
+                for (order in 1..2) {
+                    p.pathEffect = if (order == 1) null else DashPathEffect(floatArrayOf(7 * dp, 5 * dp), 0f)
+                    val f1 = order * lo * 5 / Dsp.MPH / circ
+                    val f2 = order * hi * 5 / Dsp.MPH / circ
+                    val q = Path()
+                    var end = 0f to 0f
+                    for (k in 0..40) {
+                        val f = f1 + (f2 - f1) * k / 40
+                        if (f < 2) continue
+                        val x = left + w * k / 40
+                        val y = min(top + h, ly(f, top, h))
+                        if (q.isEmpty) q.moveTo(x, y) else q.lineTo(x, y)
+                        end = x to y
+                    }
+                    g.drawPath(q, p)
+                    p.pathEffect = null
+                    p.style = Paint.Style.FILL
+                    p.textAlign = Paint.Align.RIGHT
+                    g.drawText("$order×", end.first - 4 * dp, end.second - 5 * dp, p)
+                    p.style = Paint.Style.STROKE
                 }
-                g.drawPath(q, p)
             }
+        }
+    }
+
+    /**
+     * Spread of strength at 20 to 50 Hz in each speed band: the bar runs from the 10th to the 90th percentile of 2 s windows,
+     * the tick is the median. A tall bar means it comes and goes; a short one means it is steady. b, in grey, is a comparison.
+     */
+    @SuppressLint("ViewConstructor")
+    class Spread(c: Context, private val a: Dsp, private val b: Dsp?, private val mu: Int) : View(c) {
+        override fun onMeasure(w: Int, h: Int) {
+            val width = MeasureSpec.getSize(w)
+            setMeasuredDimension(width, (width * .6).toInt())
+        }
+
+        override fun onDraw(g: Canvas) {
+            val dp = resources.displayMetrics.density
+            val left = 40 * dp
+            val top = 8 * dp
+            val w = width - left - 8 * dp
+            val h = height - top - 34 * dp
+            val sets = listOfNotNull(a, b)
+            val used = (0 until Dsp.NB).filter { k -> sets.any { it.spreadCount(k) >= MIN } }
+            if (used.isEmpty()) return
+            val lo = max(1, used.first())
+            val hi = max(lo + 4, used.last() + 1)
+            var mx = .1
+            for (d in sets) for (k in lo until hi) if (d.spreadCount(k) >= MIN) mx = max(mx, d.pct(k, .9) * 1.1)
+            val p = pen(dp)
+            val step = if (mx > 1.2) {
+                .5
+            } else if (mx > .6) {
+                .2
+            } else if (mx > .3) {
+                .1
+            } else {
+                .05
+            }
+            for (v in generateSequence(0.0) { it + step }.takeWhile { it < mx }) {
+                val y = (top + h - v / mx * h).toFloat()
+                p.color = mu
+                p.alpha = 55
+                p.strokeWidth = dp
+                g.drawLine(left, y, left + w, y, p)
+                p.alpha = 255
+                p.textAlign = Paint.Align.RIGHT
+                g.drawText(String.format(Locale.UK, "%.2f", v), left - 4 * dp, y + 4 * dp, p)
+            }
+            val cw = w / (hi - lo)
+            p.textAlign = Paint.Align.CENTER
+            for (k in lo..hi) if (k % 2 == 0) g.drawText("${k * 5}", left + (k - lo) * cw, top + h + 15 * dp, p)
+            g.drawText("mph", left + w / 2, top + h + 30 * dp, p)
+            val y = { v: Double -> (top + h - v / mx * h).toFloat() }
+            for ((i, d) in sets.withIndex()) {
+                val slot = cw / sets.size
+                for (k in lo until hi) {
+                    if (d.spreadCount(k) < MIN) continue
+                    val x0 = left + (k - lo) * cw + i * slot + slot * .2f
+                    val x1 = left + (k - lo) * cw + (i + 1) * slot - slot * .2f
+                    p.color = if (i == 0) 0xFFFF803A.toInt() else 0xFF9DB4C0.toInt()
+                    p.alpha = 150
+                    g.drawRoundRect(x0, y(d.pct(k, .9)), x1, y(d.pct(k, .1)), 2 * dp, 2 * dp, p)
+                    p.alpha = 255
+                    p.color = 0xFFF2F0EA.toInt()
+                    val m = y(d.pct(k, .5))
+                    g.drawRect(x0, m - dp, x1, m + dp, p)
+                }
+            }
+        }
+
+        companion object {
+            /** Windows a band needs before it is drawn: 10 s of steady driving. */
+            const val MIN = 5
         }
     }
 
