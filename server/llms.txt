@@ -1,5 +1,5 @@
 # Buzz Lab API
-Vibration recordings from a phone in a car. All paths except /healthz need HTTP basic auth. Replies are JSON; errors are {"error": "..."}.
+Vibration recordings from a phone in a car. All paths except /healthz need HTTP basic auth, a phone key (`Authorization: Bearer <key>`, from signing the app in with Google at /auth/app), or a browser session from /login. Browsers see the dashboard at /. Replies are JSON; errors are {"error": "..."}.
 
 GET /api/cars                      cars and how many drives each has
 GET /api/drives                    drives, newest first, with a short summary

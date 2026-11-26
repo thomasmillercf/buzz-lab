@@ -94,6 +94,12 @@ fun MainActivity.transferDone(q: Int, u: Uri) {
 
 fun MainActivity.go(i: Intent?) {
     if (i == null) return
+    val back = i.data
+    if (i.action == Intent.ACTION_VIEW && back?.scheme == "buzzlab" && back.host == "signin") {
+        i.data = null // once only, even if the screen is rebuilt
+        finishSignIn(back)
+        return
+    }
     val tab = i.getStringExtra("tab")
     if (tab == "sync") {
         if (RecService.live == null) {

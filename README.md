@@ -29,5 +29,8 @@ Set `BUZZ_USER` and `BUZZ_PASS` (16 characters or more), and optionally `BUZZ_DA
 ## Share links
 The app can make a read-only web page of chosen drives, with an expiry and an optional PIN. Links are random keys, stored only as hashes. They never show positions, plates, notes or raw readings.
 
+## Web dashboard and sign-in
+With GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, BUZZ_PUBLIC_URL and BUZZ_GOOGLE_EMAILS set, the server shows a dashboard at / to allowed Google accounts. The app can sign in the same way through the phone's browser (PKCE, one key per phone, signed out from Settings), or skip and stay offline. Basic auth still works for scripts.
+
 ## Reading results
 A phone resting loosely can add its own resonance. Compare drives only on the same road, phone position and speed. The numbers do not show a cause.

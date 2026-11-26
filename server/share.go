@@ -176,12 +176,9 @@ func (s *server) shareFind(tok string) (*share, bool) {
 	return &h, true
 }
 
-// shareTrip gives a single shared drive its speed over time, and its route only when the sharer chose to include it.
-func (s *server) shareTrip(h *share, out []shareDrive) any {
-	if len(h.Drives) != 1 || len(out) != 1 {
-		return nil
-	}
-	pts, err := s.readTrack(h.Drives[0])
+// trip gives a single drive its speed over time, and its route only when asked (a sharer has to choose to include it).
+func (s *server) trip(id string, withRoute bool) any {
+	pts, err := s.readTrack(id)
 	if err != nil || len(pts) < 2 {
 		return nil
 	}
@@ -194,7 +191,7 @@ func (s *server) shareTrip(h *share, out []shareDrive) any {
 			m = *p.Mph
 		}
 		sp = append(sp, [2]float64{math.Round((p.T-t0)*10) / 10, math.Round(m*10) / 10})
-		if h.Route && p.Acc <= 40 && (p.Lat != 0 || p.Lon != 0) {
+		if withRoute && p.Acc <= 40 && (p.Lat != 0 || p.Lon != 0) {
 			route = append(route, [3]float64{math.Round(p.Lat*1e5) / 1e5, math.Round(p.Lon*1e5) / 1e5, math.Round(m*10) / 10})
 		}
 	}
@@ -227,11 +224,12 @@ func (s *server) shareView(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	io.WriteString(w, strings.ReplaceAll(sharePage, "{{NONCE}}", n))
+	io.WriteString(w, strings.NewReplacer("{{NONCE}}", n, "{{DASH}}", "false").Replace(sharePage))
 }
 
 type shareDrive struct {
 	N       int               `json:"no"`
+	ID      string            `json:"id,omitempty"` // dashboard only, never in a share
 	Car     string            `json:"car"`
 	Date    string            `json:"date"`
 	Place   string            `json:"place"`
@@ -293,19 +291,36 @@ func (s *server) shareData(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	all, err := s.load(query{to: math.MaxInt64, auto: -1}, "")
-	if err != nil {
-		fail(w, 500, "database")
-		return
-	}
 	want := map[string]bool{}
 	for _, id := range h.Drives {
 		want[id] = true
 	}
+	out, err := s.shareDrives(want, false)
+	if err != nil {
+		fail(w, 500, "database")
+		return
+	}
+	s.db.Exec(`UPDATE shares SET opens=opens+1 WHERE id=?`, h.ID)
+	writeJSON(w, 200, map[string]any{"title": h.Title, "expires": h.Expires, "drives": out, "view": json.RawMessage(orNull(h.view)), "trip": tripFor(s, h.Drives, out, h.Route)})
+}
+
+func tripFor(s *server, ids []string, out []shareDrive, route bool) any {
+	if len(ids) != 1 || len(out) != 1 {
+		return nil
+	}
+	return s.trip(ids[0], route)
+}
+
+// shareDrives turns stored drives into what the viewer page draws, oldest first; want nil means every drive.
+func (s *server) shareDrives(want map[string]bool, ids bool) ([]shareDrive, error) {
+	all, err := s.load(query{to: math.MaxInt64, auto: -1}, "")
+	if err != nil {
+		return nil, err
+	}
 	out := []shareDrive{}
-	for i := len(all) - 1; i >= 0; i-- { // oldest first
+	for i := len(all) - 1; i >= 0; i-- {
 		d := all[i]
-		if !want[d.ID] {
+		if want != nil && !want[d.ID] {
 			continue
 		}
 		st := d.stats()
@@ -329,8 +344,45 @@ func (s *server) shareData(w http.ResponseWriter, r *http.Request) {
 				x.Gone++
 			}
 		}
+		if ids {
+			x.ID = d.ID
+		}
 		out = append(out, x)
 	}
-	s.db.Exec(`UPDATE shares SET opens=opens+1 WHERE id=?`, h.ID)
-	writeJSON(w, 200, map[string]any{"title": h.Title, "expires": h.Expires, "drives": out, "view": json.RawMessage(orNull(h.view)), "trip": s.shareTrip(h, out)})
+	return out, nil
+}
+
+// dashboard is the signed-in owner's own view: every drive, or one with its route.
+func (s *server) dashboard(w http.ResponseWriter, r *http.Request) {
+	n := random(16)
+	shareHeaders(w, n)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	io.WriteString(w, strings.NewReplacer("{{NONCE}}", n, "{{DASH}}", "true").Replace(sharePage))
+}
+
+func (s *server) dashData(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("drive")
+	var want map[string]bool
+	if id != "" {
+		if !idRe.MatchString(id) {
+			fail(w, 404, "no such drive")
+			return
+		}
+		want = map[string]bool{id: true}
+	}
+	out, err := s.shareDrives(want, true)
+	if err != nil {
+		fail(w, 500, "database")
+		return
+	}
+	if id != "" && len(out) == 0 {
+		fail(w, 404, "no such drive")
+		return
+	}
+	who, _ := s.sessionEmail(r)
+	var t any
+	if id != "" {
+		t = tripFor(s, []string{id}, out, true)
+	}
+	writeJSON(w, 200, map[string]any{"title": "Buzz Lab", "user": who, "drives": out, "view": nil, "trip": t})
 }

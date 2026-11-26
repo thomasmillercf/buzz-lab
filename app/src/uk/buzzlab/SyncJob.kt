@@ -183,8 +183,9 @@ class SyncJob : JobService() {
             return s.take(220)
         }
 
-        @JvmStatic fun auth(ui: SharedPreferences): String =
-            "Basic " + Base64.encodeToString("${ui.getString("su", "")}:${ui.getString("sp", "")}".toByteArray(), Base64.NO_WRAP)
+        /** The phone's own key once signed in with Google, else the typed user name and password. */
+        @JvmStatic fun auth(ui: SharedPreferences): String = ui.getString("tok", "").orEmpty().takeIf { it.isNotEmpty() }?.let { "Bearer $it" }
+            ?: "Basic " + Base64.encodeToString("${ui.getString("su", "")}:${ui.getString("sp", "")}".toByteArray(), Base64.NO_WRAP)
 
         /** Each step on its own line, so a failure shows where it happened. */
         @JvmStatic fun test(c: Context): String = buildString {
@@ -206,7 +207,8 @@ class SyncJob : JobService() {
             val saver = cm.restrictBackgroundStatus == ConnectivityManager.RESTRICT_BACKGROUND_STATUS_ENABLED
             append("Data Saver limits this app: ${if (saver) "YES" else "no"}\n")
             if (url.isEmpty()) return@buildString append("No server set up.").let { }
-            val loginSaved = ui.getString("su", "").orEmpty().isNotEmpty() && ui.getString("sp", "").orEmpty().isNotEmpty()
+            val loginSaved = ui.getString("tok", "").orEmpty().isNotEmpty() ||
+                (ui.getString("su", "").orEmpty().isNotEmpty() && ui.getString("sp", "").orEmpty().isNotEmpty())
             append("Server: $url\nLogin saved: ${if (loginSaved) "yes" else "NO"}\n")
             try {
                 append("Address found: ${InetAddress.getByName(URL(url).host).hostAddress}\n")

@@ -1,4 +1,4 @@
-// Buzz Lab backend: one binary, SQLite, basic auth. See /llms.txt on a running server for the API.
+// Buzz Lab backend: one binary, SQLite, basic auth for the app and Google sign-in for browsers. See /llms.txt on a running server for the API.
 package main
 
 import (
@@ -16,6 +16,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -43,6 +44,7 @@ type server struct {
 	user, pass [32]byte
 	mu         sync.Mutex
 	fails      map[string][]time.Time
+	google     *googleAuth // nil when Google sign-in isn't configured
 }
 
 type meta struct {
@@ -82,7 +84,7 @@ func open(dir string) (*sql.DB, error) {
 	db.SetMaxOpenConns(1)
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS cars(id TEXT PRIMARY KEY,name TEXT NOT NULL,tyre TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS drives(id TEXT PRIMARY KEY,car TEXT NOT NULL,start INTEGER NOT NULL,end INTEGER NOT NULL,place TEXT NOT NULL,note TEXT NOT NULL,tyre TEXT NOT NULL,stats TEXT NOT NULL,marks TEXT NOT NULL DEFAULT '',uploaded INTEGER NOT NULL);
-CREATE INDEX IF NOT EXISTS drives_car ON drives(car,start);` + shareSchema)
+CREATE INDEX IF NOT EXISTS drives_car ON drives(car,start);` + shareSchema + sessionSchema + deviceSchema)
 	if err != nil {
 		return nil, err
 	}
@@ -108,6 +110,29 @@ func (s *server) auth(h http.Handler) http.Handler {
 			io.WriteString(w, "ok\n")
 			return
 		}
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Cache-Control", "no-store")
+		if _, ok := s.deviceEmail(r); ok { // a phone signed in with Google
+			h.ServeHTTP(w, r)
+			return
+		}
+		if _, ok := s.sessionEmail(r); ok {
+			// a cookie rides along on any request, so changes need a header another site can't send
+			if r.Method != "GET" && r.Method != "HEAD" && r.Header.Get("X-Buzz-Web") != "1" {
+				fail(w, http.StatusForbidden, "missing X-Buzz-Web header")
+				return
+			}
+			h.ServeHTTP(w, r)
+			return
+		}
+		if _, _, ok := r.BasicAuth(); !ok && s.google != nil && r.Method == "GET" && strings.Contains(r.Header.Get("Accept"), "text/html") {
+			to := "/login"
+			if r.URL.RequestURI() != "/" {
+				to += "?next=" + url.QueryEscape(r.URL.RequestURI())
+			}
+			http.Redirect(w, r, to, http.StatusFound)
+			return
+		}
 		ip := clientIP(r)
 		if s.blocked(ip) {
 			fail(w, http.StatusTooManyRequests, "too many failed sign-ins, try again in 10 minutes")
@@ -120,12 +145,12 @@ func (s *server) auth(h http.Handler) http.Handler {
 			if ok {
 				s.note(ip)
 			}
-			w.Header().Set("WWW-Authenticate", `Basic realm="Buzz Lab", charset="UTF-8"`)
+			if r.Header.Get("X-Buzz-Web") == "" { // the web page handles this itself, without the browser's password box
+				w.Header().Set("WWW-Authenticate", `Basic realm="Buzz Lab", charset="UTF-8"`)
+			}
 			fail(w, http.StatusUnauthorized, "sign in with basic auth")
 			return
 		}
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("Cache-Control", "no-store")
 		h.ServeHTTP(w, r)
 	})
 }
@@ -702,7 +727,8 @@ func (s *server) del(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) routes() http.Handler {
 	m := http.NewServeMux()
-	m.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/llms.txt", http.StatusFound) })
+	m.HandleFunc("GET /{$}", s.dashboard)
+	m.HandleFunc("GET /api/view", s.dashData)
 	m.HandleFunc("GET /llms.txt", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		io.WriteString(w, llms)
@@ -727,9 +753,17 @@ func (s *server) routes() http.Handler {
 	pub := http.NewServeMux() // reachable without the login, only by its random key
 	pub.HandleFunc("GET /s/{token}", s.shareView)
 	pub.HandleFunc("POST /s/{token}/data", s.shareData)
+	pub.HandleFunc("GET /login", s.loginView)
+	pub.HandleFunc("GET /auth/google", s.googleStart)
+	pub.HandleFunc("GET /auth/callback", s.googleCallback)
+	pub.HandleFunc("POST /auth/logout", s.logout)
+	pub.HandleFunc("GET /auth/app", s.appAsk)
+	pub.HandleFunc("POST /auth/app", s.appAllow)
+	pub.HandleFunc("POST /auth/app/token", s.appToken)
+	pub.HandleFunc("POST /auth/app/signout", s.appSignOut)
 	private := s.auth(m)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/s/") {
+		if strings.HasPrefix(r.URL.Path, "/s/") || strings.HasPrefix(r.URL.Path, "/auth/") || r.URL.Path == "/login" {
 			pub.ServeHTTP(w, r)
 			return
 		}
@@ -770,6 +804,10 @@ func main() {
 	s, err := newServer(env("BUZZ_DATA", "./data"), os.Getenv("BUZZ_USER"), os.Getenv("BUZZ_PASS"))
 	if err != nil {
 		log.Fatal(err)
+	}
+	s.google = newGoogle(os.Getenv("GOOGLE_CLIENT_ID"), os.Getenv("GOOGLE_CLIENT_SECRET"), env("GOOGLE_TOKEN_URL", "https://oauth2.googleapis.com/token"), os.Getenv("BUZZ_PUBLIC_URL"), os.Getenv("BUZZ_GOOGLE_EMAILS"))
+	if s.google != nil {
+		log.Printf("google sign-in on for %d address(es)", len(s.google.emails))
 	}
 	h := &http.Server{Addr: env("BUZZ_ADDR", "127.0.0.1:8095"), Handler: s.routes(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
 	log.Printf("listening on %s", h.Addr)

@@ -113,6 +113,10 @@ class MainActivity : Activity() {
         startWatching()
         show(b?.getString("tab", "home") ?: "home")
         if (b == null) go(intent)
+        if (b == null && !ui.getBoolean("welcomed", false) && intent?.data == null) {
+            // people who set a server up before this screen existed have already chosen
+            if (SyncJob.ready(this) || st.list().isNotEmpty()) ui.edit().putBoolean("welcomed", true).apply() else welcome()
+        }
     }
 
     /** The logo stays up at least SPLASH_MS on a cold start. */

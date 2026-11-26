@@ -22,4 +22,7 @@ object Scenes {
     val TYRES = arrayOf("205/55R16", "225/45R17", "235/55R18")
     const val CAR_EXAMPLE = "My car"
     const val TYRE_NOTE = "The buttons are common sizes."
+
+    /** The server "Sign in with Google" uses. Empty means set one up by hand. */
+    const val SERVER = ""
 }
