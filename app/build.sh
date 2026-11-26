@@ -1,6 +1,6 @@
 #!/bin/bash
 # Builds out/buzzlab.apk. usage: build.sh <tools dir>
-# The tools dir holds jdk/, kotlinc/, and an Android platform (android.jar) and build-tools (aapt2, d8, zipalign, apksigner).
+# The tools dir holds jdk/, kotlinc/, ktlint (github.com/pinterest/ktlint), and an Android platform (android.jar) and build-tools (aapt2, d8, zipalign, apksigner).
 set -euo pipefail
 cd "$(dirname "$0")"
 K=$1
@@ -9,6 +9,9 @@ BT=$(dirname "$(find "$K" -name aapt2 -type f | head -1)")
 AJ=$(find "$K" -name android.jar | head -1)
 KS=$K/kotlinc/lib/kotlin-stdlib.jar
 rm -rf out && mkdir -p out/classes
+
+# Kotlin style (.editorconfig): fix what can be fixed, then fail on anything left. LINT=check only checks, changing nothing.
+if [ "${LINT:-format}" = check ]; then "$K/ktlint" "src/**/*.kt"; else "$K/ktlint" --format "src/**/*.kt"; fi
 
 # Signing key: made once and kept. Updates must use the same key, or Android makes you uninstall first.
 mkdir -p -m 700 .keys

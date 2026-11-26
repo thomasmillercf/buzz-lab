@@ -11,14 +11,22 @@ import kotlin.math.roundToLong
 /** Where and how fast a drive went, from its GPS file. Kept as trip.json so lists stay quick. */
 class Trip {
     @JvmField var lat = DoubleArray(0)
+
     @JvmField var lon = DoubleArray(0)
+
     @JvmField var mph = DoubleArray(0)
+
     @JvmField var t = DoubleArray(0)
+
     @JvmField var miles = 0.0
+
     @JvmField var movingS = 0.0
+
     @JvmField var topMph = 0.0
+
     /** Seconds moving in each 5 mph band. */
     @JvmField val atSpeed = DoubleArray(16)
+
     @JvmField var start = 0L
 
     /** Average while moving, so time stopped doesn't count. */
@@ -43,7 +51,8 @@ class Trip {
     companion object {
         const val MPH = 2.23694
 
-        @JvmStatic @Throws(Exception::class)
+        @JvmStatic
+        @Throws(Exception::class)
         fun load(dir: File, start: Long): Trip {
             val cache = File(dir, "trip.json")
             Store.read(cache)?.let { runCatching { return from(JSONObject(it), start) } }
@@ -54,7 +63,8 @@ class Trip {
         }
 
         /** Fixes with a position and accuracy within 40 m; mph is NaN where GPS gave no speed. */
-        @JvmStatic @Throws(java.io.IOException::class)
+        @JvmStatic
+        @Throws(java.io.IOException::class)
         fun build(dir: File): Trip {
             var base = -1L
             val rows = File(dir, "gps.csv").readLines().drop(1).mapNotNull { line ->
@@ -90,7 +100,8 @@ class Trip {
             return trip
         }
 
-        @JvmStatic @Throws(JSONException::class)
+        @JvmStatic
+        @Throws(JSONException::class)
         fun from(o: JSONObject, start: Long): Trip {
             if (o.optInt("v") != 1) throw JSONException("old")
             val trip = Trip()

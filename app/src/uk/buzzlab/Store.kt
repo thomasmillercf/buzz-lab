@@ -11,7 +11,9 @@ import kotlin.math.PI
 /** Cars and drives as files in app-private storage. */
 class Store(c: Context) {
     @JvmField val dir: File = c.filesDir
+
     @JvmField val drives = File(dir, "drives").apply { mkdirs() }
+
     @JvmField val carsF = File(dir, "cars.json")
 
     fun cars(): JSONArray = runCatching { JSONArray(read(carsF)) }.getOrDefault(JSONArray())
@@ -54,7 +56,8 @@ class Store(c: Context) {
         @JvmStatic fun read(f: File): String? = runCatching { f.readText() }.getOrNull()
 
         /** Write through a temporary file, so a crash never leaves half a file. */
-        @JvmStatic @Throws(java.io.IOException::class)
+        @JvmStatic
+        @Throws(java.io.IOException::class)
         fun write(f: File, s: String) {
             val tmp = File(f.path + ".tmp")
             tmp.writeText(s)
@@ -67,7 +70,8 @@ class Store(c: Context) {
             val (w, a, d) = m.destructured
             return PI * (d.toInt() * 25.4 + 2.0 * w.toInt() * a.toInt() / 100) / 1000 * .97
         }
-
-        private fun JSONArray.objects(): List<JSONObject> = (0 until length()).mapNotNull { optJSONObject(it) }
     }
 }
+
+/** The objects in a JSON array, skipping anything else. */
+fun JSONArray.objects(): List<JSONObject> = (0 until length()).mapNotNull { optJSONObject(it) }

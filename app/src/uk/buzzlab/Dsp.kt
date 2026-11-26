@@ -21,9 +21,13 @@ import kotlin.math.sqrt
  */
 class Dsp {
     @JvmField val psd = Array(NB) { DoubleArray(NF) }
+
     @JvmField val ax = Array(NB) { DoubleArray(3) }
+
     @JvmField val n = IntArray(NB)
+
     @JvmField var maxMph = 0.0
+
     @JvmField var km = 0.0
 
     fun add(o: Dsp) {
@@ -59,9 +63,11 @@ class Dsp {
     fun mean(loMph: Int, hiMph: Int): DoubleArray? {
         val s = DoubleArray(NF)
         var c = 0
-        for (b in bins(loMph, hiMph)) if (n[b] > 0) {
-            c += n[b]
-            for (f in 0 until NF) s[f] += psd[b][f]
+        for (b in bins(loMph, hiMph)) {
+            if (n[b] > 0) {
+                c += n[b]
+                for (f in 0 until NF) s[f] += psd[b][f]
+            }
         }
         if (c == 0) return null
         for (f in 0 until NF) s[f] /= c.toDouble()
@@ -108,7 +114,8 @@ class Dsp {
             return k
         }
 
-        @JvmStatic @Throws(JSONException::class)
+        @JvmStatic
+        @Throws(JSONException::class)
         fun from(o: JSONObject): Dsp {
             val d = Dsp()
             for (b in 0 until NB) {
@@ -125,7 +132,8 @@ class Dsp {
         }
 
         /** Cached stats if they're current, else worked out from the raw files and cached. */
-        @JvmStatic @Throws(Exception::class)
+        @JvmStatic
+        @Throws(Exception::class)
         fun load(dir: File): Dsp {
             val cache = File(dir, "stats.json")
             Store.read(cache)?.let { runCatching { return from(JSONObject(it)) } }
@@ -133,7 +141,8 @@ class Dsp {
             return analyse(r.t, r.v, r.gps).also { Store.write(cache, it.json().toString()) }
         }
 
-        @JvmStatic @Throws(Exception::class)
+        @JvmStatic
+        @Throws(Exception::class)
         fun raw(dir: File): Raw {
             val f = File(dir, "acc.bin")
             val count = (f.length() / 20).toInt()
@@ -150,8 +159,11 @@ class Dsp {
             }
             val gps = File(dir, "gps.csv").readLines().drop(1).mapNotNull { line ->
                 val p = line.split(",")
-                if (p.size < 5 || p[3].isEmpty()) null
-                else doubleArrayOf((p[0].toLong() - base) / 1e9, 0.0, 0.0, p[3].toDouble(), p[4].toDouble())
+                if (p.size < 5 || p[3].isEmpty()) {
+                    null
+                } else {
+                    doubleArrayOf((p[0].toLong() - base) / 1e9, 0.0, 0.0, p[3].toDouble(), p[4].toDouble())
+                }
             }.toTypedArray()
             return Raw(t, v, gps)
         }
