@@ -1,10 +1,15 @@
 package uk.buzzlab
 
+import org.json.JSONObject
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.io.File
+import java.util.Random
+import kotlin.math.PI
+import kotlin.math.sin
 import kotlin.math.sqrt
 
 /** The analysis must find a known buzz at the right frequency, speed and strength. */
@@ -128,5 +133,111 @@ class DspTest {
         total.add(a)
         assertEquals(2 * a.count(0, 80), total.count(0, 80))
         assertArrayEquals(a.mean(40, 45), total.mean(40, 45), 1e-9)
+    }
+
+    /** The band a twelfth of an octave wide that holds 30 Hz: it runs from 29.3 to 31.1 Hz. */
+    private val bandAt30Hz = 47
+
+    /** 200 s at 40 mph, quiet except for a 30 Hz buzz of amplitude 0.5 through the first 20 s. */
+    private fun analysedWithABuzzInTheFirstTenth(): Dsp {
+        val seconds = 200
+        val readings = (seconds * Fixtures.FS).toInt()
+        val noise = Random(1)
+        val times = DoubleArray(readings) { it / Fixtures.FS }
+        val acceleration = Array(readings) { index ->
+            val buzz = if (times[index] < 20) .5 * sin(2 * PI * 30 * times[index]) else 0.0
+            floatArrayOf(
+                (.02 * noise.nextGaussian()).toFloat(),
+                (.02 * noise.nextGaussian() + buzz).toFloat(),
+                (.02 * noise.nextGaussian() + 9.81).toFloat(),
+            )
+        }
+        val gps = Array(seconds + 1) { second -> doubleArrayOf(second.toDouble(), 0.0, 0.0, 40 / Dsp.MPH, 5.0) }
+        return Dsp.analyse(times, acceleration, gps)
+    }
+
+    @Test
+    fun `a band's power is the mean of the whole Hz it holds`() {
+        val spectrum = DoubleArray(Dsp.NF)
+        spectrum[30 - Dsp.F0] = .6
+        spectrum[31 - Dsp.F0] = .2
+        assertEquals(.4, Dsp.bandPower(spectrum, bandAt30Hz), 1e-12)
+    }
+
+    @Test
+    fun `a band too narrow to hold a whole Hz reads between the two nearest`() {
+        val spectrum = DoubleArray(Dsp.NF)
+        spectrum[2 - Dsp.F0] = 1.0
+        spectrum[3 - Dsp.F0] = 2.0
+        assertEquals(1.119, Dsp.bandPower(spectrum, 1), .001, "band 1 is centred on 2.119 Hz")
+    }
+
+    @Test
+    fun `a steady buzz is as strong in a typical window as in the strongest`() {
+        val d = analysed()
+        assertEquals(.23, d.bandLevelsAt(.5, 40, 45)!![bandAt30Hz], .04, "a sine of amplitude 0.5 reads 0.23 in its band")
+        assertEquals(.23, d.bandLevelsAt(.99, 40, 45)!![bandAt30Hz], .04)
+    }
+
+    @Test
+    fun `a buzz in one window in ten shows in the strongest 1 percent but not in a typical window`() {
+        val d = analysedWithABuzzInTheFirstTenth()
+        assertEquals(.23, d.bandLevelsAt(.99, 40, 45)!![bandAt30Hz], .04)
+        assertTrue(d.bandLevelsAt(.5, 40, 45)!![bandAt30Hz] < .01, "the typical window holds only noise")
+    }
+
+    @Test
+    fun `one speed bin gives the same levels as a range that holds only it`() {
+        val d = analysed()
+        assertArrayEquals(d.bandLevelsAt(.9, 40, 45), d.bandLevelsInSpeedBin(.9, 8), 0.0)
+        assertNull(d.bandLevelsInSpeedBin(.9, 3), "nothing was driven at 15 to 20 mph")
+    }
+
+    @Test
+    fun `every steady window has its band levels counted`() {
+        val d = analysed()
+        assertEquals(d.count(40, 45), d.bandLevelWindows(40, 45))
+    }
+
+    @Test
+    fun `band levels survive a round trip through json`() {
+        val d = analysed()
+        val e = Dsp.from(JSONObject(d.json().toString()))
+        for (band in 0 until Dsp.BANDS) assertArrayEquals(d.bandLevelCounts[8][band], e.bandLevelCounts[8][band], "band $band")
+    }
+
+    @Test
+    fun `band levels add up across drives`() {
+        val a = analysed()
+        val total = Dsp()
+        total.add(a)
+        total.add(a)
+        assertEquals(2 * a.bandLevelWindows(40, 45), total.bandLevelWindows(40, 45))
+        assertArrayEquals(a.bandLevelsAt(.9, 40, 45), total.bandLevelsAt(.9, 40, 45), 1e-12)
+    }
+
+    @Test
+    fun `stats saved before band levels were kept have none`() {
+        val old = analysed().json().apply { remove("bandLevels") }
+        val d = Dsp.from(old)
+        assertEquals(0, d.bandLevelWindows(40, 45))
+        assertNull(d.bandLevelsAt(.9, 40, 45))
+    }
+
+    @Test
+    fun `stats from an older version are worked out again from the raw readings`() {
+        val dir = Fixtures.tempDir()
+        Fixtures.drive(dir)
+        val old = Dsp.load(dir).json().put("v", 3).apply { remove("bandLevels") }
+        Store.write(File(dir, "stats.json"), old.toString())
+        assertTrue(Dsp.load(dir).bandLevelWindows(40, 45) > 30)
+    }
+
+    @Test
+    fun `band levels drawn as a spectrum hold their power at each frequency`() {
+        val spectrum = Dsp.spectrumFromBandLevels(DoubleArray(Dsp.BANDS) { .2 })
+        assertEquals(Dsp.NF, spectrum.size)
+        assertEquals(.04, spectrum[30 - Dsp.F0], 1e-12)
+        assertEquals(.04, spectrum[230 - Dsp.F0], 1e-12)
     }
 }
