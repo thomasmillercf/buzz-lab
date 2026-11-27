@@ -170,10 +170,19 @@ func TestOldShortStatsMix(t *testing.T) {
 }
 
 func TestMissingShareIsAPage(t *testing.T) {
-	_, h := mk(t)
-	w := do(h, "GET", "/s/"+strings.Repeat("a", 43), nil, "", "")
-	if w.Code != 404 || w.Header().Get("Content-Type") != "text/html; charset=utf-8" || !strings.Contains(w.Body.String(), "<p>This link doesn&#39;t exist or has expired.</p>") {
-		t.Fatal(w.Code, w.Header().Get("Content-Type"), w.Body.String())
+	_, handler := mk(t)
+	unknownLink := "/s/" + strings.Repeat("a", 43)
+
+	response := do(handler, "GET", unknownLink, nil, "", "")
+
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("status: got %d, want 404", response.Code)
+	}
+	if contentType := response.Header().Get("Content-Type"); contentType != "text/html; charset=utf-8" {
+		t.Fatalf("content type: got %q, want an HTML page", contentType)
+	}
+	if page := response.Body.String(); !strings.Contains(page, "<p>This link doesn&#39;t exist or has expired.</p>") {
+		t.Fatalf("the page doesn't say the link is gone: %s", page)
 	}
 }
 
