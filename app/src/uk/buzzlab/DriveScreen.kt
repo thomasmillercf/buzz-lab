@@ -33,6 +33,7 @@ fun feelText(m: JSONObject): String {
 fun MainActivity.drive(m: JSONObject) {
     val id = m.optString("id")
     page(carName(m.optString("car"))) { history() }
+    icon(R.drawable.i_info, "Reading the charts") { chartGuide { findDrive(id)?.let { drive(it) } ?: history() } }
     if (SyncJob.ready(this)) icon(R.drawable.i_share, "Share") { shareOne(m) }
     val notOnServer = if (onServer(m)) " It's deleted from the server too." else ""
     overflow(
@@ -131,6 +132,8 @@ fun MainActivity.stats(d: Dsp, other: Dsp?, otherName: String?, tyre: String, lo
         return
     }
     val log = ui.getBoolean("log", false)
+    lateinit var showOnCharts: (ChartView) -> Unit
+    val chosenChartView = addChartViewSlider(d, lo, hi) { showOnCharts(it) }
     heading("Strength by speed")
     val c = Store.circ(tyre)
     val hm = Charts.Heat(this, d, c, true, MU)
@@ -140,17 +143,25 @@ fun MainActivity.stats(d: Dsp, other: Dsp?, otherName: String?, tyre: String, lo
         "Brighter means stronger. From 0 to 0.35 m/s²/√Hz, or doubling from 0.005 to 0.32 with log strength on. Frequency is on a log scale." +
             (
                 if (c > 0) {
-                    " The solid white line is once per wheel turn, the dashed one twice. Something that follows a line comes from the" +
-                        " wheels or tyres; a level band that stays at one frequency whatever the speed is a resonance."
+                    " The solid white line is once per wheel turn, the dashed one twice."
                 } else {
                     " Add a tyre size for the wheel-turn lines."
                 }
                 ) +
-            " Lightly smoothed to cut speckle. Columns need 6 seconds of steady driving.",
+            " Lightly smoothed to cut speckle. Columns need 6 seconds of steady driving. Tap ⓘ at the top for what common patterns mean.",
     )
-    heading("Average spectrum")
+    val spectrumHeading = heading("Average spectrum")
     val ln = Charts.Line(this, p, q, true, MU, log)
     list.addView(ln)
+    showOnCharts = { chartView ->
+        hm.shareOfWindows = chartView.shareOfWindows
+        ln.a = spectrumShownAs(chartView, d, lo, hi)
+        ln.b = other?.let { spectrumShownAs(chartView, it, lo, hi) }
+        spectrumHeading.text = chartView.spectrumHeading
+        hm.invalidate()
+        ln.invalidate()
+    }
+    showOnCharts(chosenChartView)
     checkBox("Log strength, both charts", log).setOnCheckedChangeListener { _, on ->
         ui.edit().putBoolean("log", on).apply()
         ln.log = on
@@ -160,9 +171,10 @@ fun MainActivity.stats(d: Dsp, other: Dsp?, otherName: String?, tyre: String, lo
     }
     val against = if (q == null) "" else " against ${Dsp.peak(q, 15, 100)} Hz"
     note(
-        "Orange: this selection" + (if (q == null) "" else ". Grey: $otherName") + ". Strongest above 15 Hz: ${Dsp.peak(p, 15, 100)} Hz$against" +
+        "Orange: this selection" + (if (q == null) "" else ". Grey: $otherName") + ". On average, strongest above 15 Hz: ${Dsp.peak(p, 15, 100)} Hz$against" +
             String.format(Locale.UK, ". Along the phone's length at 25 to 35 Hz: %.0f%%.", 100 * d.foreAft(lo, hi)),
     )
+    note("Average strength in each band:", 13)
     val s = StringBuilder("Hz        m/s²" + (if (q == null) "" else "   other  ratio") + "\n")
     for ((a, b) in listOf(2 to 8, 8 to 20, 25 to 35, 38 to 48, 50 to 80, 80 to 120, 120 to 230)) {
         val r = Dsp.rms(p, a, b)
