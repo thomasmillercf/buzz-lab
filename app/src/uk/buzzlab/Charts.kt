@@ -12,7 +12,6 @@ import kotlin.math.ceil
 import kotlin.math.ln
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
@@ -21,36 +20,18 @@ object Charts {
     /** One orange ramp on navy: dark is near zero, bright is strong. */
     private val RAMP = longArrayOf(0xFF062B3F, 0xFF4A2430, 0xFF8E2A1A, 0xFFD4320F, 0xFFF95A26, 0xFFFF8F4D, 0xFFFFD9B8).map { it.toInt() }
 
-    /** Twelfth-octave bands from 2 to about 220 Hz. */
-    const val NK = 82
+    const val NK = Dsp.BANDS
 
-    private fun centre(k: Int) = 2 * 2.0.pow(k / 12.0)
+    private fun edge(k: Int) = Dsp.bandLowerEdge(k)
 
-    private fun edge(k: Int) = max(2.0, centre(k) * 2.0.pow(-1 / 24.0))
-
-    /** Power averaged into twelfth-octave bands, then lightly blended with its neighbours in frequency and speed. Display only. */
-    @JvmStatic fun smooth(d: Dsp): Array<DoubleArray> {
+    /** Power in each band at each speed, lightly blended with its neighbours: the average, or what a given share of windows stayed under. Display only. */
+    @JvmStatic @JvmOverloads
+    fun smooth(d: Dsp, shareOfWindows: Double? = null): Array<DoubleArray> {
         val v = Array(Dsp.NB) { DoubleArray(NK) }
         val o = Array(Dsp.NB) { DoubleArray(NK) }
         for (b in 0 until Dsp.NB) {
             if (d.n[b] < 3) continue
-            val q = DoubleArray(NK) { k ->
-                var s = 0.0
-                var c = 0
-                var f = ceil(edge(k)).toInt()
-                while (f < edge(k + 1) && f <= 230) {
-                    s += d.psd[b][f - Dsp.F0]
-                    c++
-                    f++
-                }
-                if (c == 0) {
-                    val x = min(229.0, centre(k))
-                    val i = x.toInt()
-                    s = d.psd[b][i - Dsp.F0] * (i + 1 - x) + d.psd[b][i + 1 - Dsp.F0] * (x - i)
-                    c = 1
-                }
-                s / c / d.n[b]
-            }
+            val q = bandPowers(d, b, shareOfWindows) ?: continue
             for (k in 0 until NK) v[b][k] = .5 * q[k] + .25 * q[max(0, k - 1)] + .25 * q[min(NK - 1, k + 1)]
         }
         for (b in 0 until Dsp.NB) {
@@ -69,6 +50,12 @@ object Charts {
             }
         }
         return o
+    }
+
+    private fun bandPowers(d: Dsp, speedBin: Int, shareOfWindows: Double?): DoubleArray? {
+        if (shareOfWindows == null) return DoubleArray(NK) { band -> Dsp.bandPower(d.psd[speedBin], band) / d.n[speedBin] }
+        val levels = d.bandLevelsInSpeedBin(shareOfWindows, speedBin) ?: return null
+        return DoubleArray(NK) { band -> levels[band] * levels[band] }
     }
 
     /** Mixes two colours; w from 0 (all a) to 1 (all b). */
@@ -94,6 +81,9 @@ object Charts {
     class Heat(c: Context, @JvmField var d: Dsp, private val circ: Double, @Suppress("unused") dark: Boolean, private val mu: Int) : View(c) {
         @JvmField var log = false
 
+        /** Null draws the average; a share draws what that share of windows stayed under, so 0.99 is the strongest 1%. */
+        @JvmField var shareOfWindows: Double? = null
+
         init {
             contentDescription = "Chart of vibration strength by speed and frequency"
         }
@@ -113,7 +103,7 @@ object Charts {
             val hi = max(8, (0 until Dsp.NB).filter { d.n[it] >= 3 }.maxOfOrNull { it + 1 } ?: 0)
             val lo = 1
             val cw = w / (hi - lo)
-            val z = smooth(d)
+            val z = smooth(d, shareOfWindows)
             for (b in lo until hi) {
                 if (d.n[b] < 3) continue
                 for (k in 0 until NK) {

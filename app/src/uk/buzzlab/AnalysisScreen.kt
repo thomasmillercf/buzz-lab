@@ -41,6 +41,7 @@ fun MainActivity.analysis() {
     val k = minOf(ui.getInt("cmp", 0), cs.size)
     val o = if (k == 0) null else cs[k - 1]
     top(c.optString("name") + (o?.let { " and " + it.optString("name") } ?: ""))
+    icon(R.drawable.i_info, "Reading the charts") { chartGuide { show("analysis") } }
     if (SyncJob.ready(this)) icon(R.drawable.i_share, "Share") { shareAnalysis() }
     val nm = cs.map { it.optString("name") }
     val pair = row()
