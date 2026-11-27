@@ -214,27 +214,25 @@ func (s *server) shareView(w http.ResponseWriter, r *http.Request) {
 	shareHeaders(w, n)
 	ip := "share:" + clientIP(r)
 	if s.blocked(ip) {
-		shareNotice(w, http.StatusTooManyRequests, "Too many tries. Wait 10 minutes.")
+		writeShareNotice(w, http.StatusTooManyRequests, "Too many tries. Wait 10 minutes.")
 		return
 	}
 	if _, ok := s.shareFind(r.PathValue("token")); !ok {
 		s.note(ip)
-		shareNotice(w, http.StatusNotFound, "This link doesn't exist or has expired.")
+		writeShareNotice(w, http.StatusNotFound, "This link doesn't exist or has expired.")
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	io.WriteString(w, strings.NewReplacer("{{NONCE}}", n, "{{DASH}}", "false").Replace(sharePage))
 }
 
-const noticePage = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>Vibration results</title>
-<style>:root{color-scheme:dark;--bg:#021b29;--card:#043349;--fg:#f2f0ea;--mu:#9db6c3;--ln:#14506c}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,sans-serif;padding:16px}main{width:100%;max-width:380px;background:var(--card);border:1px solid var(--ln);border-radius:12px;padding:28px 24px;display:grid;gap:12px}h1{margin:0;font-size:24px}p{margin:0;color:var(--mu)}</style></head><body><main>
-<h1>Vibration results</h1><p>{{MSG}}</p>
-</main></body></html>`
+//go:embed notice.html
+var noticePage string
 
-func shareNotice(w http.ResponseWriter, code int, msg string) {
+func writeShareNotice(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(code)
-	io.WriteString(w, strings.Replace(noticePage, "{{MSG}}", html.EscapeString(msg), 1))
+	w.WriteHeader(status)
+	io.WriteString(w, strings.Replace(noticePage, "{{MSG}}", html.EscapeString(message), 1))
 }
 
 type shareDrive struct {
