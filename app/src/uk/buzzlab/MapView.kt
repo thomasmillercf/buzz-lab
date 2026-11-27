@@ -26,7 +26,7 @@ import kotlin.math.ln
 import kotlin.math.roundToInt
 import kotlin.math.tan
 
-/** OpenStreetMap tiles, darkened, with routes coloured by speed. Drag to move, pinch to zoom, double-tap to fit. */
+/** OpenStreetMap tiles, darkened, with routes coloured by speed. */
 @SuppressLint("ViewConstructor")
 class MapView(c: Context, t: List<Trip>, private val bg: Int) : View(c) {
     private val trips = t.filter { it.lat.size > 1 }
@@ -37,6 +37,9 @@ class MapView(c: Context, t: List<Trip>, private val bg: Int) : View(c) {
     private var scale = 1.0
     private var z = 12
     private var fitted = false
+
+    /** Until the map is pinched, a one-finger drag is left to the page, so the page still scrolls past the map. */
+    private var pinched = false
     private var lx = 0f
     private var ly = 0f
     private val h = Handler(Looper.getMainLooper())
@@ -60,6 +63,7 @@ class MapView(c: Context, t: List<Trip>, private val bg: Int) : View(c) {
         c,
         object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
             override fun onScale(d: ScaleGestureDetector): Boolean {
+                pinched = true
                 zoomAt(d.scaleFactor, d.focusX, d.focusY)
                 return true
             }
@@ -70,11 +74,16 @@ class MapView(c: Context, t: List<Trip>, private val bg: Int) : View(c) {
         object : GestureDetector.SimpleOnGestureListener() {
             override fun onDoubleTap(e: MotionEvent): Boolean {
                 fitted = false
+                pinched = false
                 invalidate()
                 return true
             }
         },
     )
+
+    init {
+        contentDescription = "Map of the routes driven"
+    }
 
     override fun onMeasure(w: Int, hh: Int) {
         val width = MeasureSpec.getSize(w)
@@ -117,11 +126,11 @@ class MapView(c: Context, t: List<Trip>, private val bg: Int) : View(c) {
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
-        parent.requestDisallowInterceptTouchEvent(true)
+        parent.requestDisallowInterceptTouchEvent(pinched || e.pointerCount > 1)
         taps.onTouchEvent(e)
         pinch.onTouchEvent(e)
         if (e.pointerCount == 1 && !pinch.isInProgress) {
-            if (e.actionMasked == MotionEvent.ACTION_MOVE) {
+            if (pinched && e.actionMasked == MotionEvent.ACTION_MOVE) {
                 cx -= (e.x - lx) / scale
                 cy -= (e.y - ly) / scale
                 invalidate()

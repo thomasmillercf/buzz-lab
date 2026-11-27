@@ -102,7 +102,7 @@ private fun MainActivity.journey(t: Trip) {
     heading("Route")
     list.addView(MapView(this, listOf(t), BG))
     speedKey()
-    note("Average leaves out time stopped. Drag or pinch the map; double-tap to fit it again.", 13)
+    note("Average leaves out time stopped. Pinch the map to zoom in, then drag to move it; double-tap to fit it again.", 13)
 }
 
 /** The colours used for speed on maps and charts. */

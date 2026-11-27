@@ -100,7 +100,7 @@ private fun MainActivity.drivingTotals(drives: Int, ts: List<Trip>) {
     heading("Everywhere it has been")
     list.addView(MapView(this, ts, BG))
     speedKey()
-    note("Every drive in these dates, coloured by speed. Drag or pinch; double-tap to fit.", 13)
+    note("Every drive in these dates, coloured by speed. Pinch to zoom in, then drag; double-tap to fit.", 13)
 }
 
 private fun MainActivity.bars(what: String, values: DoubleArray, labels: Array<String>, unit: String, colour: Int) =
