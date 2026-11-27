@@ -395,19 +395,22 @@ object Charts {
                 p.color = col
                 g.drawRoundRect(x + bw * .14f, top + h - bh, x + bw * .86f, top + h, 3 * dp, 3 * dp, p)
                 p.color = mu
-                if (i % every == 0) drawCentredInside(g, lab[i], x + bw / 2, top + h + 15 * dp, p)
+                if (i % every == 0) drawTextCentredInsideChart(g, lab[i], x + bw / 2, top + h + 15 * dp, p)
             }
             val k = v.indices.maxByOrNull { v[it] } ?: return
             if (v[k] > 0) {
                 p.color = 0xFFF2F0EA.toInt()
-                val tallest = String.format(Locale.UK, if (v[k] >= 10) "%.0f%s" else "%.1f%s", v[k], unit)
-                drawCentredInside(g, tallest, k * bw + bw / 2, top + h - (v[k] / m * h).toFloat() - 5 * dp, p)
+                val tallestBarValue = String.format(Locale.UK, if (v[k] >= 10) "%.0f%s" else "%.1f%s", v[k], unit)
+                val tallestBarTop = top + h - (v[k] / m * h).toFloat()
+                drawTextCentredInsideChart(g, tallestBarValue, k * bw + bw / 2, tallestBarTop - 5 * dp, p)
             }
         }
 
-        private fun drawCentredInside(g: Canvas, s: String, x: Float, y: Float, p: Paint) {
-            val half = p.measureText(s) / 2
-            g.drawText(s, x.coerceIn(half, max(half, width - half)), y, p)
+        private fun drawTextCentredInsideChart(canvas: Canvas, text: String, centreX: Float, baselineY: Float, paint: Paint) {
+            val halfTextWidth = paint.measureText(text) / 2
+            val leftmostCentre = halfTextWidth
+            val rightmostCentre = max(leftmostCentre, width - halfTextWidth)
+            canvas.drawText(text, centreX.coerceIn(leftmostCentre, rightmostCentre), baselineY, paint)
         }
     }
 }

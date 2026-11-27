@@ -45,8 +45,8 @@ fun MainActivity.welcome() {
     text("Buzz Lab", 28, true)
     note("Records how your car vibrates, and plays it back so you can feel it again.", 16)
     text("", 8)
-    val google = Scenes.SERVER.isNotEmpty()
-    if (google) {
+    val canSignInWithGoogle = Scenes.SERVER.isNotEmpty()
+    if (canSignInWithGoogle) {
         button("Sign in with Google", "Back up drives to your server and see them on the web") { signIn() }
     } else {
         button("Set up a server", "Back up drives to your own server and see them on the web") {
@@ -54,8 +54,8 @@ fun MainActivity.welcome() {
             syncSetup()
         }
     }
-    val later = if (google) "sign in" else "set up a server"
-    button("Skip, offline only", "Everything stays on this phone. You can $later later in Settings.") { done(false) }
+    val laterOption = if (canSignInWithGoogle) "sign in" else "set up a server"
+    button("Skip, offline only", "Everything stays on this phone. You can $laterOption later in Settings.") { done(false) }
 }
 
 private fun MainActivity.done(signedIn: Boolean) {

@@ -219,9 +219,17 @@ fun MainActivity.button(a: String, b: String = "", l: ((View) -> Unit)? = null):
 fun MainActivity.primary(b: Button): Button {
     b.background = box(AC)
     b.setTextColor(NAV)
-    b.text = SpannableString(b.text).apply { getSpans(0, length, ForegroundColorSpan::class.java).forEach(::removeSpan) }
+    b.text = withoutColouredText(b.text)
     b.gravity = Gravity.CENTER
     return b
+}
+
+/** A button's grey second line can't be read on orange, so it takes the button's own text colour. */
+private fun withoutColouredText(text: CharSequence): SpannableString {
+    val plain = SpannableString(text)
+    val colouredParts = plain.getSpans(0, plain.length, ForegroundColorSpan::class.java)
+    colouredParts.forEach { plain.removeSpan(it) }
+    return plain
 }
 
 /** Grey and centred, for Skip, Discard and the like. */
