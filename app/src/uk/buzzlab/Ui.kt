@@ -11,7 +11,6 @@ import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
-import android.graphics.drawable.InsetDrawable
 import android.graphics.drawable.RippleDrawable
 import android.os.SystemClock
 import android.text.SpannableString
@@ -110,6 +109,7 @@ fun MainActivity.top(title: String, back: Boolean = false): TextView {
         typeface = Typeface.DEFAULT_BOLD
         isSingleLine = true
         ellipsize = TextUtils.TruncateAt.END
+        isAccessibilityHeading = true
         setPadding(dp(8), 0, dp(8), 0)
     }
     bar.addView(t, LinearLayout.LayoutParams(0, -2, 1f))
@@ -164,7 +164,7 @@ fun MainActivity.text(s: String, size: Int, bold: Boolean = false, col: Int = FG
 /** Smaller grey text. */
 fun MainActivity.note(s: String, size: Int = 14) = text(s, size, col = MU)
 
-fun MainActivity.heading(s: String) = text(s, 18, true)
+fun MainActivity.heading(s: String) = text(s, 18, true).apply { isAccessibilityHeading = true }
 
 fun MainActivity.box(c: Int): Drawable {
     val g = GradientDrawable().apply {
@@ -199,7 +199,6 @@ fun MainActivity.button(a: String, b: String = "", l: ((View) -> Unit)? = null):
         x.text = s
     }
     x.isSingleLine = false
-    x.maxLines = 4
     x.ellipsize = null
     x.textSize = 16f
     x.setTextColor(FG)
@@ -220,6 +219,7 @@ fun MainActivity.button(a: String, b: String = "", l: ((View) -> Unit)? = null):
 fun MainActivity.primary(b: Button): Button {
     b.background = box(AC)
     b.setTextColor(NAV)
+    b.text = SpannableString(b.text).apply { getSpans(0, length, ForegroundColorSpan::class.java).forEach(::removeSpan) }
     b.gravity = Gravity.CENTER
     return b
 }
@@ -270,27 +270,15 @@ fun MainActivity.spinner(options: List<String>, sel: Int, f: (Int) -> Unit): But
     b.setOnClickListener {
         tap(it)
         val rows = options.mapIndexed { i, o -> (if (i == at) "✓  " else "     ") + o }.toTypedArray()
-        val d = AlertDialog.Builder(this).setItems(rows) { _, i ->
+        AlertDialog.Builder(this).setItems(rows) { _, i ->
             if (i != at) {
                 at = i
                 b.text = "${options[i]}  ▾"
                 f(i)
             }
-        }.create()
-        d.show()
-        rounded(d, true)
+        }.show()
     }
     return b
-}
-
-/** Dialogs in the card colour with round corners. */
-fun MainActivity.rounded(d: AlertDialog, edge: Boolean = false) {
-    val g = GradientDrawable().apply {
-        setColor(CARD)
-        cornerRadius = dp(16).toFloat()
-        if (edge) setStroke(dp(1), EDGE)
-    }
-    d.window?.setBackgroundDrawable(InsetDrawable(g, dp(12)))
 }
 
 fun MainActivity.field(label: String, value: String): EditText {
@@ -299,6 +287,7 @@ fun MainActivity.field(label: String, value: String): EditText {
         setText(value)
         setTextColor(FG)
         isSingleLine = true
+        minHeight = dp(48)
     }
     list.addView(x)
     return x
@@ -310,6 +299,7 @@ fun MainActivity.checkBox(label: String, on: Boolean = false, add: Boolean = tru
         setTextColor(FG)
         buttonTintList = ColorStateList.valueOf(AC)
         isChecked = on
+        minHeight = dp(48)
     }
     if (add) list.addView(c)
     return c
@@ -386,8 +376,8 @@ fun MainActivity.toggles(labels: List<String>, top: Int = 6, bottom: Int = 4): L
             isAllCaps = false
             text = s
             textSize = 15f
-            minHeight = dp(44)
-            minimumHeight = dp(44)
+            minHeight = dp(48)
+            minimumHeight = dp(48)
         }
         val q = LinearLayout.LayoutParams(0, -2, 1f)
         if (i > 0) q.marginStart = dp(8)
@@ -400,6 +390,7 @@ fun MainActivity.toggles(labels: List<String>, top: Int = 6, bottom: Int = 4): L
 fun MainActivity.choose(bs: List<Button>, on: Int) = bs.forEachIndexed { k, b ->
     b.background = box(if (k == on) AC else CARD)
     b.setTextColor(if (k == on) NAV else FG)
+    b.isSelected = k == on
 }
 
 fun MainActivity.notificationsButton() {

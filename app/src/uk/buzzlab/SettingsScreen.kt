@@ -10,8 +10,6 @@ import android.provider.Settings
 import android.text.InputType
 import android.widget.ArrayAdapter
 import android.widget.AutoCompleteTextView
-import android.widget.Button
-import android.widget.LinearLayout
 import org.json.JSONObject
 import uk.buzzlab.MainActivity.Companion.AC
 import uk.buzzlab.MainActivity.Companion.FG
@@ -94,7 +92,7 @@ fun MainActivity.settings() {
     note("Buzz Lab ${version()}")
 }
 
-private fun MainActivity.section(s: String) = text(s, 14, true, MU)
+private fun MainActivity.section(s: String) = text(s, 14, true, MU).apply { isAccessibilityHeading = true }
 
 private fun MainActivity.autoToggle() {
     if (ui.getBoolean("auto", false)) {
@@ -210,40 +208,38 @@ fun MainActivity.editCar(c0: JSONObject?) {
         setHintTextColor(MU)
     }
     list.addView(t)
-    val q = row()
-    for (s in Scenes.TYRES) {
-        val b = Button(this).apply {
-            isAllCaps = false
-            text = s
-            textSize = 13f
-            setOnClickListener {
-                t.setText(s)
-                t.dismissDropDown()
-            }
+    val sizes = toggles(Scenes.TYRES.asList())
+    choose(sizes, -1)
+    sizes.forEach { b ->
+        b.setOnClickListener {
+            tap(it)
+            t.setText(b.text)
+            t.dismissDropDown()
         }
-        q.addView(b, LinearLayout.LayoutParams(0, -2, 1f))
     }
     note("${Scenes.TYRE_NOTE} Looking sizes up from a reg plate needs a paid data service, so it isn't connected.")
     status = text("", 15)
-    button("Save") {
-        val name = n.text.toString().trim()
-        val tyre = t.text.toString().trim()
-        if (name.isEmpty()) {
-            say("Give the car a name.")
-            return@button
-        }
-        if (tyre.isNotEmpty() && Store.circ(tyre) == 0.0) {
-            say("Write the tyre size like ${Scenes.TYRES[0]}.")
-            return@button
-        }
-        try {
-            val c = c0 ?: JSONObject().put("id", "c${System.currentTimeMillis()}")
-            c.put("name", name).put("reg", reg.text.toString().trim()).put("tyre", tyre)
-            st.putCar(c)
-            ui.edit().putString("car", c.getString("id")).apply()
-            carsPage()
-        } catch (x: Exception) {
-            say(x.toString())
-        }
-    }
+    primary(
+        button("Save") {
+            val name = n.text.toString().trim()
+            val tyre = t.text.toString().trim()
+            if (name.isEmpty()) {
+                say("Give the car a name.")
+                return@button
+            }
+            if (tyre.isNotEmpty() && Store.circ(tyre) == 0.0) {
+                say("Write the tyre size like ${Scenes.TYRES[0]}.")
+                return@button
+            }
+            try {
+                val c = c0 ?: JSONObject().put("id", "c${System.currentTimeMillis()}")
+                c.put("name", name).put("reg", reg.text.toString().trim()).put("tyre", tyre)
+                st.putCar(c)
+                ui.edit().putString("car", c.getString("id")).apply()
+                carsPage()
+            } catch (x: Exception) {
+                say(x.toString())
+            }
+        },
+    )
 }

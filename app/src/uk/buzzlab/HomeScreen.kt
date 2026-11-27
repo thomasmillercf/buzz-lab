@@ -33,7 +33,7 @@ fun MainActivity.home() {
     val cs = cars()
     if (cs.isEmpty()) {
         text("Add a car to start.", 16)
-        button("Add a car") { editCar(null) }
+        primary(button("Add a car") { editCar(null) })
         return
     }
     note("Car", 15)
