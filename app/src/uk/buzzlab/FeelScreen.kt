@@ -40,27 +40,13 @@ fun bands(d: Dsp): List<Band> = (10 until 80 step 10).mapNotNull { lo ->
  * The source is what Analysis shows (its car, comparison and filters) or one drive, chosen from that drive's page.
  */
 fun MainActivity.feel() {
-    val calibrated = sp.contains(Scenes.ALL[0].key)
-    overflow(
-        linkedMapOf(
-            (if (calibrated) "Calibrate again" else "Calibrate") to { askCalibrate() },
-            "Calibration details" to {
-                AlertDialog.Builder(this).setMessage(sp.getString("report", "No calibration saved.")).setPositiveButton("Close", null).show()
-            },
-            (if (ui.getBoolean("spk", false)) "Speaker flutter: on" else "Speaker flutter: off") to {
-                ui.edit().putBoolean("spk", !ui.getBoolean("spk", false)).apply()
-                toast(if (ui.getBoolean("spk", false)) "Speaker flutter on" else "Speaker flutter off")
-                show("feel")
-            },
-        ),
-    )
     if (!AudioManager.isHapticPlaybackSupported()) {
         top("Feel")
         text("This phone can't play haptic audio, so Feel can't work on it.", 16)
         return
     }
-    if (!calibrated) {
-        top("Feel")
+    if (!isCalibrated()) {
+        showFeelTitleWithMenu("Feel")
         heading("Calibrate first")
         note(
             "Feel plays the vibration your drives recorded through the phone's motor. First it measures how strongly this phone can buzz, " +
@@ -87,11 +73,38 @@ fun MainActivity.feel() {
     controls()
 }
 
+private fun MainActivity.isCalibrated() = sp.contains(Scenes.ALL[0].key)
+
+private fun MainActivity.isSpeakerFlutterOn() = ui.getBoolean("spk", false)
+
+private fun MainActivity.showFeelTitleWithMenu(title: String) {
+    top(title)
+    overflow(
+        linkedMapOf(
+            (if (isCalibrated()) "Calibrate again" else "Calibrate") to { askCalibrate() },
+            "Calibration details" to { showCalibrationDetails() },
+            "Speaker flutter: ${if (isSpeakerFlutterOn()) "on" else "off"}" to { toggleSpeakerFlutter() },
+        ),
+    )
+}
+
+private fun MainActivity.showCalibrationDetails() {
+    val details = sp.getString("report", "No calibration saved.")
+    AlertDialog.Builder(this).setMessage(details).setPositiveButton("Close", null).show()
+}
+
+private fun MainActivity.toggleSpeakerFlutter() {
+    val turnOn = !isSpeakerFlutterOn()
+    ui.edit().putBoolean("spk", turnOn).apply()
+    toast(if (turnOn) "Speaker flutter on" else "Speaker flutter off")
+    show("feel")
+}
+
 /** The car and comparison from Analysis, with its filters. */
 private fun MainActivity.feelCars() {
     val cs = cars()
     if (cs.isEmpty()) {
-        top("Feel")
+        showFeelTitleWithMenu("Feel")
         heading("Your drives")
         note("Add a car on Home and record a drive, then feel it here.", 15)
         return
@@ -99,7 +112,7 @@ private fun MainActivity.feelCars() {
     val c = cs[idx(cs, pref("acar"))]
     val k = minOf(ui.getInt("cmp", 0), cs.size)
     val o = if (k == 0 || cs[k - 1].optString("id") == c.optString("id")) null else cs[k - 1]
-    top(c.optString("name") + (o?.let { " and " + it.optString("name") } ?: ""))
+    showFeelTitleWithMenu(c.optString("name") + (o?.let { " and " + it.optString("name") } ?: ""))
     val nm = cs.map { it.optString("name") }
     val pair = row()
     column(pair) {
@@ -137,7 +150,7 @@ private fun MainActivity.feelCars() {
 /** One drive, opened from its page. */
 private fun MainActivity.feelDrive(m: JSONObject) {
     val name = carName(m.optString("car"))
-    top("$name, " + date(m.optLong("start"), "d MMM HH:mm"))
+    showFeelTitleWithMenu("$name, " + date(m.optLong("start"), "d MMM HH:mm"))
     note("One drive" + m.optString("place").let { if (it.isEmpty()) "" else ", $it" } + ".", 15)
     quiet(
         button("Feel all $name drives instead") {
@@ -315,7 +328,7 @@ private fun MainActivity.pct() = ui.getInt("pct", 100) / 100.0
 
 private fun MainActivity.curve(k: String): JSONArray? = runCatching { JSONArray(sp.getString(k, "")) }.getOrNull()
 
-private fun MainActivity.flutter() = if (ui.getBoolean("spk", false)) .25 * pct() else 0.0
+private fun MainActivity.flutter() = if (isSpeakerFlutterOn()) .25 * pct() else 0.0
 
 /**
  * Loops a buzz at rate pulses a second. level is the strength in the car, in m/s²; 0.70 plays as the strongest the phone reached,

@@ -8,6 +8,7 @@ import java.io.DataInputStream
 import java.io.File
 import java.io.FileInputStream
 import kotlin.math.PI
+import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.ln
@@ -32,6 +33,9 @@ class Dsp {
     /** For each speed bin, how many windows fell in each strength step at 20 to 50 Hz. Shows spread, not just the average. */
     @JvmField val h = Array(NB) { IntArray(NH) }
 
+    /** For each speed bin and frequency band, how many windows fell in each strength step, which shows the bursts an average hides. */
+    @JvmField val bandLevelCounts = Array(NB) { Array(BANDS) { IntArray(LEVEL_STEPS) } }
+
     @JvmField var maxMph = 0.0
 
     @JvmField var km = 0.0
@@ -42,9 +46,31 @@ class Dsp {
             for (f in 0 until NF) psd[b][f] += o.psd[b][f]
             for (a in 0 until 3) ax[b][a] += o.ax[b][a]
             for (k in 0 until NH) h[b][k] += o.h[b][k]
+            for (band in 0 until BANDS) {
+                for (step in 0 until LEVEL_STEPS) bandLevelCounts[b][band][step] += o.bandLevelCounts[b][band][step]
+            }
         }
         maxMph = max(maxMph, o.maxMph)
         km += o.km
+    }
+
+    /** Each band's counts as [first step, count, count, …], or empty where it has none, so the unused steps take no room. */
+    private fun bandLevelsJson(): JSONArray {
+        val bySpeedBin = JSONArray()
+        for (speedBin in 0 until NB) {
+            val byBand = JSONArray()
+            for (counts in bandLevelCounts[speedBin]) {
+                val run = JSONArray()
+                val firstStep = counts.indexOfFirst { it > 0 }
+                if (firstStep >= 0) {
+                    run.put(firstStep)
+                    for (step in firstStep..counts.indexOfLast { it > 0 }) run.put(counts[step])
+                }
+                byBand.put(run)
+            }
+            bySpeedBin.put(byBand)
+        }
+        return bySpeedBin
     }
 
     fun json(): JSONObject {
@@ -65,7 +91,7 @@ class Dsp {
             axes.put(q)
         }
         return JSONObject().put("v", V).put("n", counts).put("psd", spectra).put("ax", axes).put("h", hist)
-            .put("maxMph", maxMph).put("km", km)
+            .put("bandLevels", bandLevelsJson()).put("maxMph", maxMph).put("km", km)
     }
 
     /** Mean PSD over a speed range, or null when there was no steady driving in it. */
@@ -92,20 +118,28 @@ class Dsp {
      * The q-th share (0 to 1) of window strengths at 20 to 50 Hz in speed bin b, in m/s²; NaN when there are none.
      * Read off the steps, interpolating within one on a log scale.
      */
-    fun pct(b: Int, q: Double): Double {
-        val total = spreadCount(b)
-        if (total == 0) return Double.NaN
-        val want = q * total
-        var c = 0.0
-        for (k in 0 until NH) {
-            if (h[b][k] == 0) continue
-            if (c + h[b][k] >= want) {
-                val frac = ((want - c) / h[b][k]).coerceIn(0.0, 1.0)
-                return hEdge(k) * 2.0.pow(frac / HPO)
+    fun pct(b: Int, q: Double): Double = levelUnder(q, h[b], H_LO, HPO)
+
+    /** Windows in a speed range whose band levels were counted. Stats worked out before version 4 have none. */
+    fun bandLevelWindows(loMph: Int, hiMph: Int): Int = bins(loMph, hiMph).sumOf { bandLevelCounts[it][0].sum() }
+
+    /** For each band, the strength in m/s²/√Hz that a share (0 to 1) of windows stayed under, so 0.99 is the strongest 1%. Null with no levels counted. */
+    fun bandLevelsAt(share: Double, loMph: Int, hiMph: Int): DoubleArray? = bandLevelsAcross(bins(loMph, hiMph), share)
+
+    fun bandLevelsInSpeedBin(share: Double, speedBin: Int): DoubleArray? = bandLevelsAcross(listOf(speedBin), share)
+
+    private fun bandLevelsAcross(speedBins: List<Int>, share: Double): DoubleArray? {
+        val combinedCounts = IntArray(LEVEL_STEPS)
+        val levels = DoubleArray(BANDS)
+        for (band in 0 until BANDS) {
+            combinedCounts.fill(0)
+            for (speedBin in speedBins) {
+                for (step in 0 until LEVEL_STEPS) combinedCounts[step] += bandLevelCounts[speedBin][band][step]
             }
-            c += h[b][k]
+            levels[band] = levelUnder(share, combinedCounts, LEVEL_LOWEST, LEVEL_STEPS_PER_DOUBLING)
         }
-        return hEdge(NH)
+        val nothingCounted = levels[0].isNaN()
+        return if (nothingCounted) null else levels
     }
 
     /** Share of 25 to 35 Hz along the phone's length. */
@@ -131,7 +165,7 @@ class Dsp {
         const val MAX_GAP_S = .05
 
         /** Stats layout version; older caches are worked out again when the raw readings are there. */
-        const val V = 3
+        const val V = 4
 
         /** Spread steps: HPO per doubling, from H_LO m/s² up. Values outside go in the end steps. */
         const val NH = 24
@@ -141,6 +175,83 @@ class Dsp {
         @JvmStatic fun hEdge(k: Int): Double = H_LO * 2.0.pow(k.toDouble() / HPO)
 
         @JvmStatic fun hBin(r: Double): Int = if (r <= H_LO) 0 else min(NH - 1, floor(HPO * ln(r / H_LO) / ln(2.0)).toInt())
+
+        /** Frequency bands a twelfth of an octave wide, from 2 Hz to about 220 Hz. */
+        const val BANDS = 82
+
+        @JvmStatic fun bandCentre(band: Int): Double = 2 * 2.0.pow(band / 12.0)
+
+        @JvmStatic fun bandLowerEdge(band: Int): Double = max(2.0, bandCentre(band) * 2.0.pow(-1 / 24.0))
+
+        /** Mean power in one band of a spectrum with a value per whole Hz. A band too narrow to hold a whole Hz reads between the two nearest. */
+        @JvmStatic fun bandPower(spectrum: DoubleArray, band: Int): Double {
+            var sum = 0.0
+            var wholeHzInBand = 0
+            var hz = ceil(bandLowerEdge(band)).toInt()
+            while (hz < bandLowerEdge(band + 1) && hz <= F1) {
+                sum += spectrum[hz - F0]
+                wholeHzInBand++
+                hz++
+            }
+            if (wholeHzInBand > 0) return sum / wholeHzInBand
+            val centre = min(F1 - 1.0, bandCentre(band))
+            val hzBelow = centre.toInt()
+            return spectrum[hzBelow - F0] * (hzBelow + 1 - centre) + spectrum[hzBelow + 1 - F0] * (centre - hzBelow)
+        }
+
+        /** Band level steps: LEVEL_STEPS_PER_DOUBLING per doubling, from LEVEL_LOWEST m/s²/√Hz up. Levels outside go in the end steps. */
+        const val LEVEL_STEPS = 104
+        private const val LEVEL_STEPS_PER_DOUBLING = 8
+        private const val LEVEL_LOWEST = .0005
+
+        @JvmStatic fun levelStep(level: Double): Int {
+            if (level <= LEVEL_LOWEST) return 0
+            val doublingsAboveLowest = ln(level / LEVEL_LOWEST) / ln(2.0)
+            return min(LEVEL_STEPS - 1, floor(LEVEL_STEPS_PER_DOUBLING * doublingsAboveLowest).toInt())
+        }
+
+        /** The level a share of the counted windows stayed under, interpolated within a step on a log scale. NaN when none were counted. */
+        private fun levelUnder(share: Double, counts: IntArray, lowestLevel: Double, stepsPerDoubling: Int): Double {
+            val total = counts.sum()
+            if (total == 0) return Double.NaN
+            val windowsWanted = share * total
+            var windowsBelow = 0.0
+            for (step in counts.indices) {
+                if (counts[step] == 0) continue
+                if (windowsBelow + counts[step] >= windowsWanted) {
+                    val partWayThroughStep = ((windowsWanted - windowsBelow) / counts[step]).coerceIn(0.0, 1.0)
+                    return lowestLevel * 2.0.pow((step + partWayThroughStep) / stepsPerDoubling)
+                }
+                windowsBelow += counts[step]
+            }
+            return lowestLevel * 2.0.pow(counts.size.toDouble() / stepsPerDoubling)
+        }
+
+        /** Band levels drawn out as power at each whole Hz from F0, so they chart the same way as a mean spectrum. */
+        @JvmStatic fun spectrumFromBandLevels(levels: DoubleArray): DoubleArray = DoubleArray(NF) { index ->
+            val hz = F0 + index
+            val bandPosition = (12 * ln(hz / 2.0) / ln(2.0)).coerceIn(0.0, BANDS - 1.0)
+            val bandBelow = min(BANDS - 2, bandPosition.toInt())
+            val partWayToNextBand = bandPosition - bandBelow
+            val level = levels[bandBelow] * (1 - partWayToNextBand) + levels[bandBelow + 1] * partWayToNextBand
+            level * level
+        }
+
+        private fun readBandLevels(saved: JSONArray?, into: Dsp) {
+            if (saved == null) return
+            for (speedBin in 0 until min(NB, saved.length())) {
+                val byBand = saved.optJSONArray(speedBin) ?: continue
+                for (band in 0 until min(BANDS, byBand.length())) {
+                    val run = byBand.optJSONArray(band) ?: continue
+                    if (run.length() == 0) continue
+                    val firstStep = run.getInt(0)
+                    for (position in 1 until run.length()) {
+                        val step = firstStep + position - 1
+                        if (step in 0 until LEVEL_STEPS) into.bandLevelCounts[speedBin][band][step] = run.getInt(position)
+                    }
+                }
+            }
+        }
 
         /** Speed bins wholly inside lo..hi mph. */
         private fun bins(lo: Int, hi: Int) = (0 until NB).filter { it * 5 >= lo && it * 5 + 5 <= hi }
@@ -172,6 +283,7 @@ class Dsp {
                 for (a in 0 until q.length()) d.ax[b][a] = q.getDouble(a)
                 o.optJSONArray("h")?.optJSONArray(b)?.let { hb -> for (k in 0 until min(NH, hb.length())) d.h[b][k] = hb.getInt(k) }
             }
+            readBandLevels(o.optJSONArray("bandLevels"), d)
             d.maxMph = o.optDouble("maxMph")
             d.km = o.optDouble("km")
             return d
@@ -289,6 +401,11 @@ class Dsp {
                     if (F0 + f in 20 until 50) band += p[f] / segments
                 }
                 d.h[b][hBin(sqrt(band))]++
+                val windowSpectrum = DoubleArray(NF) { p[it] / segments }
+                for (frequencyBand in 0 until BANDS) {
+                    val level = sqrt(bandPower(windowSpectrum, frequencyBand))
+                    d.bandLevelCounts[b][frequencyBand][levelStep(level)]++
+                }
                 for (a in 0 until 3) d.ax[b][a] += pa[a] / segments
                 d.n[b]++
             }

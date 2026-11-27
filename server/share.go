@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"html"
 	"io"
 	"math"
 	"net/http"
@@ -213,18 +214,25 @@ func (s *server) shareView(w http.ResponseWriter, r *http.Request) {
 	shareHeaders(w, n)
 	ip := "share:" + clientIP(r)
 	if s.blocked(ip) {
-		w.WriteHeader(http.StatusTooManyRequests)
-		io.WriteString(w, "Too many tries. Wait 10 minutes.")
+		writeShareNotice(w, http.StatusTooManyRequests, "Too many tries. Wait 10 minutes.")
 		return
 	}
 	if _, ok := s.shareFind(r.PathValue("token")); !ok {
 		s.note(ip)
-		w.WriteHeader(404)
-		io.WriteString(w, "This link doesn't exist or has expired.")
+		writeShareNotice(w, http.StatusNotFound, "This link doesn't exist or has expired.")
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	io.WriteString(w, strings.NewReplacer("{{NONCE}}", n, "{{DASH}}", "false").Replace(sharePage))
+}
+
+//go:embed notice.html
+var noticePage string
+
+func writeShareNotice(w http.ResponseWriter, status int, message string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
+	io.WriteString(w, strings.Replace(noticePage, "{{MSG}}", html.EscapeString(message), 1))
 }
 
 type shareDrive struct {

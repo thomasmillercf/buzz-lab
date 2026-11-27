@@ -82,7 +82,7 @@ private fun MainActivity.drivingTotals(drives: Int, ts: List<Trip>) {
 
     heading("Time at each speed")
     val mins = DoubleArray(15) { i -> (if (i == 14) at[14] + at[15] else at[i]) / 60 }
-    list.addView(Charts.Bars(this, mins, Array(15) { "${it * 5}" }, " min", AC, MU))
+    addBarChart("Chart of minutes at each speed", mins, Array(15) { "${it * 5}" }, " min", AC)
     note("Minutes moving, by mph. Stopped time is left out.", 13)
 
     val range = ui.getInt("ddr", 0)
@@ -94,11 +94,17 @@ private fun MainActivity.drivingTotals(drives: Int, ts: List<Trip>) {
         if (i in 0 until days) per[i] += t.miles
     }
     heading("Miles per day")
-    list.addView(Charts.Bars(this, per, Array(days) { date(d0 + 86400000L * it, "d MMM") }, " mi", 0xFF2EC4B6.toInt(), MU))
+    addBarChart("Chart of miles driven each day", per, Array(days) { date(d0 + 86400000L * it, "d MMM") }, " mi", 0xFF2EC4B6.toInt())
     note("The last $days days.", 13)
 
     heading("Everywhere it has been")
     list.addView(MapView(this, ts, BG))
     speedKey()
-    note("Every drive in these dates, coloured by speed. Drag or pinch; double-tap to fit.", 13)
+    note("Every drive in these dates, coloured by speed. Pinch to zoom in, then drag; double-tap to fit.", 13)
+}
+
+private fun MainActivity.addBarChart(spokenDescription: String, values: DoubleArray, labels: Array<String>, unit: String, barColour: Int) {
+    val chart = Charts.Bars(this, values, labels, unit, barColour, MU)
+    chart.contentDescription = spokenDescription
+    list.addView(chart)
 }

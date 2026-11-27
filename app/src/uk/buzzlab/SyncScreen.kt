@@ -55,24 +55,19 @@ fun MainActivity.syncPage(back: () -> Unit = { show("home") }) {
     heading("Drives")
     val ds = st.list()
     if (ds.isEmpty()) note("None yet.", 15)
+    val serverIsSetUp = SyncJob.ready(this)
     for (m in ds) {
-        val err = m.has("syncErr")
-        val waiting = SyncJob.pending(m, url())
-        val mark = if (err) {
-            "✕  "
-        } else if (waiting) {
-            "•  "
-        } else {
-            "✓  "
+        val uploadFailed = serverIsSetUp && m.has("syncErr")
+        val waitingToUpload = serverIsSetUp && SyncJob.pending(m, url())
+        val (mark, status) = when {
+            !serverIsSetUp -> "○  " to "  on this phone only"
+            uploadFailed -> "✕  " to "\n     ${m.optString("syncErr")}"
+            waitingToUpload -> "•  " to "  waiting"
+            else -> "✓  " to "  on the server"
         }
-        val how = if (err) {
-            "\n     ${m.optString("syncErr")}"
-        } else if (waiting) {
-            "  waiting"
-        } else {
-            "  on the server"
-        }
-        text(mark + carName(m.optString("car")) + ", " + date(m.optLong("start")) + how, 15, col = if (err || waiting) AC else FG)
+        val drive = carName(m.optString("car")) + ", " + date(m.optLong("start"))
+        val needsAttention = uploadFailed || waitingToUpload
+        text(mark + drive + status, 15, col = if (needsAttention) AC else FG)
     }
     heading("Log")
     val lg = note(pref("syncLog", "Nothing yet."), 13)
@@ -106,18 +101,20 @@ fun MainActivity.syncSetup() {
     w.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
     val wifi = checkBox("Sync on Wi-Fi only", ui.getBoolean("wifi", false))
     status = text("", 15)
-    button("Save") {
-        val a = u.text.toString().trim().trimEnd('/')
-        if (!a.startsWith("https://")) {
-            say("The address must start with https:// so the password isn't sent in the open.")
-            return@button
-        }
-        ui.edit().putString("url", a).putString("su", n.text.toString().trim()).putString("sp", w.text.toString())
-            .putBoolean("wifi", wifi.isChecked).commit()
-        getSystemService(JobScheduler::class.java).cancel(SyncJob.ID)
-        settings()
-    }
-    button("Cancel") { settings() }
+    primary(
+        button("Save") {
+            val a = u.text.toString().trim().trimEnd('/')
+            if (!a.startsWith("https://")) {
+                say("The address must start with https:// so the password isn't sent in the open.")
+                return@button
+            }
+            ui.edit().putString("url", a).putString("su", n.text.toString().trim()).putString("sp", w.text.toString())
+                .putBoolean("wifi", wifi.isChecked).commit()
+            getSystemService(JobScheduler::class.java).cancel(SyncJob.ID)
+            settings()
+        },
+    )
+    quiet(button("Cancel") { settings() })
 }
 
 /** Retry drives that failed before, then upload in the background if Android allows, else here. */
