@@ -22,9 +22,7 @@ svg{display:block;width:100%;height:auto}svg text{font:13px system-ui,sans-serif
 </div></main>
 <script nonce="{{NONCE}}">
 const $=i=>document.getElementById(i),NS='http://www.w3.org/2000/svg',el=(p,t,a,x)=>{const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);if(x!=null)e.textContent=x;p.appendChild(e);return e};
-const DASH={{DASH}};const R=['#062b3f','#4a2430','#8e2a1a','#d4320f','#f95a26','#ff8f4d','#ffd9b8'],MPH=2.23694;let D=null,drawSpeed=null;
-/* A chart is drawn at the width it is shown, so its axis text stays full size on a phone. */
-function shownSize(g,w,h){const vw=Math.max(320,Math.round(g.getBoundingClientRect().width)||w),vh=Math.round(Math.max(h*.6,vw*h/w));g.setAttribute('viewBox',`0 0 ${vw} ${vh}`);return[vw,vh]}
+const DASH={{DASH}};const R=['#062b3f','#4a2430','#8e2a1a','#d4320f','#f95a26','#ff8f4d','#ffd9b8'],MPH=2.23694;let D=null;
 async function get(pin){const r=DASH?await fetch('/api/view'+location.search,{headers:{'X-Buzz-Web':'1'},cache:'no-store'}):await fetch(location.pathname+'/data',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pin:pin||''}),cache:'no-store',referrerPolicy:'no-referrer'});const j=await r.json().catch(()=>({}));if(DASH&&r.status===401){location.href='/login';return}if(r.status===401){$('pin').hidden=false;$('m').textContent=j.error==='wrong pin'?'That PIN is wrong.':'This link needs a PIN.';$('p').focus();return}if(!r.ok){$('m').textContent=j.error?j.error[0].toUpperCase()+j.error.slice(1)+'.':'Could not load this.';$('pin').hidden=true;return}D=j;$('pin').hidden=true;start()}
 $('pin').addEventListener('submit',e=>{e.preventDefault();get($('p').value)});
 function opts(s,l,sel){s.textContent='';l.forEach(([v,t])=>{const o=document.createElement('option');o.value=v;o.textContent=t;s.append(o)});if(sel!=null)s.value=sel}
@@ -34,15 +32,13 @@ function single(){const d=D.drives[0],t=D.trip;$('one').hidden=false;['a','b','p
 const f=d.felt&&Object.keys(d.felt).length?Object.entries(d.felt).map(([k,v])=>k.replace('-',' to ')+' mph: '+v.toLowerCase()).join(', '):'';$('felt').textContent=f?'Felt: '+f+'.':'';
 if(!t||!t.speed.length){$('spd').previousElementSibling.hidden=true;$('spd').hidden=true;return}const sp=t.speed,end=sp[sp.length-1][0]||1;let mi=0,mv=0,top=0;for(let i=1;i<sp.length;i++){const dt=sp[i][0]-sp[i-1][0],v=sp[i][1];if(v<0||dt<=0||dt>=5)continue;mi+=v*dt/3600;if(v>=2)mv+=dt;top=Math.max(top,v)}
 [['Miles',mi.toFixed(1)],['Average, mph',mv?Math.round(mi/(mv/3600)):'–'],['Top, mph',Math.round(top)]].forEach(([l,v])=>{const c=document.createElement('div');c.className='fig';const a=document.createElement('span');a.textContent=l;const b=document.createElement('b');b.textContent=v;c.append(a,b);$('figs').append(c)});
-drawSpeed=()=>speed(sp,end,top);drawSpeed();
+redrawSpeedChart=()=>drawSpeedChart(sp,end,top);redrawSpeedChart();
 if(t.route&&t.route.length>1)map(t.route)}
-function speed(sp,end,top){const g=$('spd');g.textContent='';const [VW,VH]=shownSize(g,920,300),L=40,T=8,W=VW-60,H=VH-50,tp=Math.max(30,Math.ceil(top/10)*10),x=s=>L+s/end*W,y=v=>T+H-v/tp*H;for(let v=0;v<=tp;v+=tp>60?20:10){el(g,'line',{x1:L,x2:L+W,y1:y(v),y2:y(v),stroke:'#14506c'});el(g,'text',{x:L-6,y:y(v)+4,'text-anchor':'end'},v)}const st=[60,120,300,600,900,1800].find(s=>W/(end/s)>=44)||3600;for(let s=0;s<=end;s+=st)el(g,'text',{x:x(s),y:T+H+20,'text-anchor':'middle'},Math.round(s/60)+'m');
-for(let i=1;i<sp.length;i++){if(sp[i][1]<0||sp[i-1][1]<0||sp[i][0]-sp[i-1][0]>6)continue;el(g,'line',{x1:x(sp[i-1][0]),y1:y(sp[i-1][1]),x2:x(sp[i][0]),y2:y(sp[i][1]),stroke:sc(sp[i][1]),'stroke-width':3,'stroke-linecap':'round'})}}
 function map(R){$('mapw').hidden=false;const box=$('map'),W=box.clientWidth,H=box.clientHeight,mx=(lo,z)=>(lo+180)/360*256*2**z,my=(la,z)=>{const r=la*Math.PI/180;return(1-Math.log(Math.tan(r)+1/Math.cos(r))/Math.PI)/2*256*2**z};let a=90,b=-90,c=180,e=-180;R.forEach(([la,lo])=>{a=Math.min(a,la);b=Math.max(b,la);c=Math.min(c,lo);e=Math.max(e,lo)});let z=17;while(z>2&&(mx(e,z)-mx(c,z)>W*.86||my(a,z)-my(b,z)>H*.82))z--;const cx=(mx(c,z)+mx(e,z))/2,cy=(my(a,z)+my(b,z))/2,l=cx-W/2,tp=cy-H/2,n=2**z;
 for(let tx=Math.floor(l/256);tx<=Math.floor((l+W)/256);tx++)for(let ty=Math.floor(tp/256);ty<=Math.floor((tp+H)/256);ty++){if(ty<0||ty>=n)continue;const im=document.createElement('img');im.alt='';im.referrerPolicy='origin';im.src=`https://tile.openstreetmap.org/${z}/${((tx%n)+n)%n}/${ty}.png`;im.style.left=(tx*256-l)+'px';im.style.top=(ty*256-tp)+'px';box.append(im)}
 const sv=document.createElementNS(NS,'svg');sv.setAttribute('viewBox',`0 0 ${W} ${H}`);box.append(sv);for(let i=1;i<R.length;i++)el(sv,'line',{x1:mx(R[i-1][1],z)-l,y1:my(R[i-1][0],z)-tp,x2:mx(R[i][1],z)-l,y2:my(R[i][0],z)-tp,stroke:sc(R[i][2]),'stroke-width':4,'stroke-linecap':'round'});
 [0,20,40,55,70].forEach(v=>{const s=document.createElement('span'),i=document.createElement('i');i.style.background=sc(v);s.append(i,document.createTextNode(v+(v===70?'+':'')+' mph'));$('mk').append(s)})}
-function start(){document.title=D.title;$('t').textContent=D.title;$('m').textContent=DASH?(D.drives.length?'':'No drives on the server yet. Upload from the app.'):'Shared results. This link works until '+D.expires+'.';$('m').hidden=!$('m').textContent;if(DASH)nav();$('app').hidden=false;const cars=[...new Set(D.drives.map(d=>d.car))],pl=[...new Set(D.drives.map(d=>d.place))];opts($('a'),cars.map(c=>[c,c]));opts($('b'),[['','Nothing'],...cars.map(c=>[c,c])],cars.length>1?cars[1]:'');const both=pl.find(p=>cars.slice(0,2).every(c=>D.drives.some(d=>d.car===c&&d.place===p)));opts($('pl'),[['','Any position'],...pl.map(c=>[c,c])],both||'');const V=D.view;if(V){const has=(s,v)=>[...$(s).options].some(o=>o.value===v);if(has('a',V.car))$('a').value=V.car;$('b').value=has('b',V.with)?V.with:'';$('pl').value=has('pl',V.place)?V.place:'';const z=V.lo+','+V.hi;if(has('sp',z))$('sp').value=z}['a','b','pl','sp','dv','lg'].forEach(i=>$(i).addEventListener('change',()=>{if(i!=='dv')drives();draw()}));drives();draw();if(D.drives.length===1)single();let shown=innerWidth;addEventListener('resize',()=>{if(innerWidth===shown)return;shown=innerWidth;draw();if(drawSpeed)drawSpeed()})}
+function start(){document.title=D.title;$('t').textContent=D.title;$('m').textContent=DASH?(D.drives.length?'':'No drives on the server yet. Upload from the app.'):'Shared results. This link works until '+D.expires+'.';$('m').hidden=!$('m').textContent;if(DASH)nav();$('app').hidden=false;const cars=[...new Set(D.drives.map(d=>d.car))],pl=[...new Set(D.drives.map(d=>d.place))];opts($('a'),cars.map(c=>[c,c]));opts($('b'),[['','Nothing'],...cars.map(c=>[c,c])],cars.length>1?cars[1]:'');const both=pl.find(p=>cars.slice(0,2).every(c=>D.drives.some(d=>d.car===c&&d.place===p)));opts($('pl'),[['','Any position'],...pl.map(c=>[c,c])],both||'');const V=D.view;if(V){const has=(s,v)=>[...$(s).options].some(o=>o.value===v);if(has('a',V.car))$('a').value=V.car;$('b').value=has('b',V.with)?V.with:'';$('pl').value=has('pl',V.place)?V.place:'';const z=V.lo+','+V.hi;if(has('sp',z))$('sp').value=z}['a','b','pl','sp','dv','lg'].forEach(i=>$(i).addEventListener('change',()=>{if(i!=='dv')drives();draw()}));drives();draw();if(D.drives.length===1)single();redrawChartsWhenWidthChanges()}
 function drives(){const keep=$('dv').value;opts($('dv'),[['','All matching drives'],...D.drives.filter(d=>d.car===$('a').value&&(!$('pl').value||d.place===$('pl').value)).map(d=>[String(d.no),d.no+'. '+d.date+', '+d.place])]);if([...$('dv').options].some(o=>o.value===keep))$('dv').value=keep}
 function pick(car,one){return D.drives.filter(d=>d.car===car&&(!$('pl').value||d.place===$('pl').value)&&(!one||String(d.no)===one))}
 function sum(ds){let L=229;ds.forEach(d=>d.n.forEach((n,b)=>{if(n>0)L=Math.min(L,d.psd[b].length)}));const n=Array(16).fill(0),p=Array.from({length:16},()=>Array(L).fill(0));ds.forEach(d=>d.n.forEach((c,b)=>{if(!c)return;n[b]+=c;for(let k=0;k<L;k++)p[b][k]+=d.psd[b][k]}));return{n,p,L}}
@@ -60,7 +56,7 @@ function draw(){const [lo,hi]=$('sp').value.split(',').map(Number),log=$('lg').c
 const sv=$('sv'),hm=$('hm');sv.textContent='';hm.textContent='';$('k').textContent='';
 $('sum').textContent=a?`${an}: ${A.length} drive${A.length===1?'':'s'}, ${a.c*2} s of steady driving, strongest at ${peak(a.m)} Hz (15 to 200 Hz).`+(b?` ${bn}: ${Bd.length} drive${Bd.length===1?'':'s'}, ${b.c*2} s, strongest at ${peak(b.m)} Hz.`:bn?` ${bn}: nothing at these settings.`:''):'Nothing matches these settings.';
 const ps=new Set([...A,...Bd].map(d=>d.place));$('warn').textContent=b&&ps.size>1?'These include different phone positions. Choose one position for a fair comparison.':'';
-if(a){const [VW,VH]=shownSize(sv,920,380),L=46,T=10,W=VW-62,H=VH-60,x=f=>L+Math.log(f/5)/Math.log(46)*W;let mx=.1;[a,b].forEach(q=>q&&q.m.forEach((v,k)=>{if(k>=3)mx=Math.max(mx,Math.sqrt(v)*1.08)}));const y=v=>T+H-(log?Math.log(Math.max(v,.001)/.001)/Math.log(mx/.001):v/mx)*H,step=mx>.4?.2:mx>.2?.1:.05,tk=log?[.001,.01,.1,1].filter(v=>v<=mx):Array.from({length:Math.ceil(mx/step)},(_,i)=>i*step);tk.forEach(v=>{el(sv,'line',{x1:L,x2:L+W,y1:y(v),y2:y(v),stroke:'#14506c'});el(sv,'text',{x:L-6,y:y(v)+4,'text-anchor':'end'},log?v:v.toFixed(2))});[5,10,20,30,50,100,200].forEach(f=>el(sv,'text',{x:x(f),y:T+H+20,'text-anchor':'middle'},f));el(sv,'text',{x:L+W/2,y:T+H+40,'text-anchor':'middle'},'Hz');
+if(a){const chart=fitChartToShownWidth(sv,920,380),L=46,T=10,W=chart.width-62,H=chart.height-60,x=f=>L+Math.log(f/5)/Math.log(46)*W;let mx=.1;[a,b].forEach(q=>q&&q.m.forEach((v,k)=>{if(k>=3)mx=Math.max(mx,Math.sqrt(v)*1.08)}));const y=v=>T+H-(log?Math.log(Math.max(v,.001)/.001)/Math.log(mx/.001):v/mx)*H,step=mx>.4?.2:mx>.2?.1:.05,tk=log?[.001,.01,.1,1].filter(v=>v<=mx):Array.from({length:Math.ceil(mx/step)},(_,i)=>i*step);tk.forEach(v=>{el(sv,'line',{x1:L,x2:L+W,y1:y(v),y2:y(v),stroke:'#14506c'});el(sv,'text',{x:L-6,y:y(v)+4,'text-anchor':'end'},log?v:v.toFixed(2))});[5,10,20,30,50,100,200].forEach(f=>el(sv,'text',{x:x(f),y:T+H+20,'text-anchor':'middle'},f));el(sv,'text',{x:L+W/2,y:T+H+40,'text-anchor':'middle'},'Hz');
 [[b,'#9db4c0',2,bn],[a,'#ff803a',3,an]].forEach(([q,c,w,n])=>{if(!q)return;el(sv,'polyline',{fill:'none',stroke:c,'stroke-width':w,'stroke-linejoin':'round',points:q.m.map((v,k)=>k>=3?x(k+2).toFixed(1)+','+y(Math.sqrt(v)).toFixed(1):'').filter(Boolean).join(' ')});const s=document.createElement('span'),i=document.createElement('i');i.style.background=c;s.append(i,document.createTextNode(n));$('k').prepend(s)});
 heat(hm,an,sa,ca,log);if(b)heat(hm,bn,sb,cb,log);$('hk').textContent=(log?'Brighter is stronger, doubling from 0.005 to 0.32. Lightly smoothed.':'Brighter is stronger, 0 to 0.35 m/s²/√Hz. Lightly smoothed.')+(ca||cb?' The white line is once per wheel turn, worked out from tyre size.':'');}
 const row=(t,c,h)=>{const r=document.createElement('tr');c.forEach(v=>{const d=document.createElement(h?'th':'td');d.textContent=v;r.append(d)});t.append(r)};
@@ -68,5 +64,72 @@ const bt=$('bt');bt.textContent='';row(bt,b?['Hz',an,bn,'Ratio']:['Hz',an],true)
 const dt=$('dt');dt.textContent='';row(dt,['No.','Car','Date','Phone position','Minutes','Felt, by mph'],true);D.drives.forEach(d=>{row(dt,[d.no,d.car,d.date,d.place,d.minutes,d.felt&&Object.keys(d.felt).length?Object.entries(d.felt).map(([k,v])=>k.replace('-',' to ')+': '+v.toLowerCase()).join(', '):d.strong+d.weak+d.gone?`marked ${d.strong} strong, ${d.weak} weak, ${d.gone} gone`:'not recorded']);if(DASH&&d.id&&D.drives.length>1){const c=dt.lastChild.children[2],a=document.createElement('a');a.href='/?drive='+encodeURIComponent(d.id);a.textContent=c.textContent;c.textContent='';c.append(a)}})}
 function nav(){$('nav').hidden=false;$('who').textContent=D.user?'Signed in as '+D.user:'';$('home').hidden=D.drives.length!==1||!location.search;const id=new URLSearchParams(location.search).get('drive');if(id&&D.drives.length===1){$('rawl').hidden=false;$('rawl').href='/api/drives/'+encodeURIComponent(id)+'/raw.zip';document.title='Buzz Lab: '+D.drives[0].date;$('t').textContent=D.drives[0].car+', '+D.drives[0].date}
 $('out').addEventListener('click',async()=>{await fetch('/auth/logout',{method:'POST',headers:{'X-Buzz-Web':'1'}}).catch(()=>{});location.href='/login'})}
+
+let redrawSpeedChart = null;
+
+/* A chart is drawn at the width it is shown, so its axis text stays full size on a phone. */
+function fitChartToShownWidth(chart, designWidth, designHeight) {
+  const shownWidth = Math.round(chart.getBoundingClientRect().width) || designWidth;
+  const width = Math.max(320, shownWidth);
+  const height = Math.round(Math.max(designHeight * 0.6, width * designHeight / designWidth));
+  chart.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  return { width, height };
+}
+
+function drawSpeedChart(readings, lastSecond, topMph) {
+  const chart = $('spd');
+  chart.textContent = '';
+  const { width, height } = fitChartToShownWidth(chart, 920, 300);
+  const plotLeft = 40;
+  const plotTop = 8;
+  const plotWidth = width - 60;
+  const plotHeight = height - 50;
+  const plotBottom = plotTop + plotHeight;
+  const highestMph = Math.max(30, Math.ceil(topMph / 10) * 10);
+  const xAt = (second) => plotLeft + second / lastSecond * plotWidth;
+  const yAt = (mph) => plotBottom - mph / highestMph * plotHeight;
+
+  const mphBetweenGridLines = highestMph > 60 ? 20 : 10;
+  for (let mph = 0; mph <= highestMph; mph += mphBetweenGridLines) {
+    el(chart, 'line', { x1: plotLeft, x2: plotLeft + plotWidth, y1: yAt(mph), y2: yAt(mph), stroke: '#14506c' });
+    el(chart, 'text', { x: plotLeft - 6, y: yAt(mph) + 4, 'text-anchor': 'end' }, mph);
+  }
+
+  const narrowestLabelGap = 44;
+  const fitsAcrossThePlot = (secondsApart) => plotWidth / (lastSecond / secondsApart) >= narrowestLabelGap;
+  const secondsBetweenLabels = [60, 120, 300, 600, 900, 1800].find(fitsAcrossThePlot) || 3600;
+  for (let second = 0; second <= lastSecond; second += secondsBetweenLabels) {
+    el(chart, 'text', { x: xAt(second), y: plotBottom + 20, 'text-anchor': 'middle' }, Math.round(second / 60) + 'm');
+  }
+
+  for (let index = 1; index < readings.length; index++) {
+    const [previousSecond, previousMph] = readings[index - 1];
+    const [second, mph] = readings[index];
+    const speedIsMissing = mph < 0 || previousMph < 0;
+    const readingsAreFarApart = second - previousSecond > 6;
+    if (speedIsMissing || readingsAreFarApart) continue;
+    el(chart, 'line', {
+      x1: xAt(previousSecond),
+      y1: yAt(previousMph),
+      x2: xAt(second),
+      y2: yAt(mph),
+      stroke: sc(mph),
+      'stroke-width': 3,
+      'stroke-linecap': 'round',
+    });
+  }
+}
+
+/* A phone fires resize each time its address bar hides, so only a change of width redraws the charts. */
+function redrawChartsWhenWidthChanges() {
+  let shownWidth = innerWidth;
+  addEventListener('resize', () => {
+    if (innerWidth === shownWidth) return;
+    shownWidth = innerWidth;
+    draw();
+    if (redrawSpeedChart) redrawSpeedChart();
+  });
+}
+
 get('');
 </script></body></html>
