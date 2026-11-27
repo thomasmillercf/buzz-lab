@@ -126,7 +126,8 @@ class MapView(c: Context, t: List<Trip>, private val bg: Int) : View(c) {
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
-        parent.requestDisallowInterceptTouchEvent(pinched || e.pointerCount > 1)
+        val mapTakesThisTouch = pinched || e.pointerCount > 1
+        parent.requestDisallowInterceptTouchEvent(mapTakesThisTouch)
         taps.onTouchEvent(e)
         pinch.onTouchEvent(e)
         if (e.pointerCount == 1 && !pinch.isInProgress) {

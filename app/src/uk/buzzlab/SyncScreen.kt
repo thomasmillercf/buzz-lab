@@ -55,17 +55,19 @@ fun MainActivity.syncPage(back: () -> Unit = { show("home") }) {
     heading("Drives")
     val ds = st.list()
     if (ds.isEmpty()) note("None yet.", 15)
-    val server = SyncJob.ready(this)
+    val serverIsSetUp = SyncJob.ready(this)
     for (m in ds) {
-        val err = server && m.has("syncErr")
-        val waiting = server && SyncJob.pending(m, url())
-        val (mark, how) = when {
-            !server -> "○  " to "  on this phone only"
-            err -> "✕  " to "\n     ${m.optString("syncErr")}"
-            waiting -> "•  " to "  waiting"
+        val uploadFailed = serverIsSetUp && m.has("syncErr")
+        val waitingToUpload = serverIsSetUp && SyncJob.pending(m, url())
+        val (mark, status) = when {
+            !serverIsSetUp -> "○  " to "  on this phone only"
+            uploadFailed -> "✕  " to "\n     ${m.optString("syncErr")}"
+            waitingToUpload -> "•  " to "  waiting"
             else -> "✓  " to "  on the server"
         }
-        text(mark + carName(m.optString("car")) + ", " + date(m.optLong("start")) + how, 15, col = if (err || waiting) AC else FG)
+        val drive = carName(m.optString("car")) + ", " + date(m.optLong("start"))
+        val needsAttention = uploadFailed || waitingToUpload
+        text(mark + drive + status, 15, col = if (needsAttention) AC else FG)
     }
     heading("Log")
     val lg = note(pref("syncLog", "Nothing yet."), 13)

@@ -208,12 +208,13 @@ fun MainActivity.editCar(c0: JSONObject?) {
         setHintTextColor(MU)
     }
     list.addView(t)
-    val sizes = toggles(Scenes.TYRES.asList())
-    choose(sizes, -1)
-    sizes.forEach { b ->
-        b.setOnClickListener {
-            tap(it)
-            t.setText(b.text)
+    val commonSizeButtons = toggles(Scenes.TYRES.asList())
+    val noneChosen = -1
+    choose(commonSizeButtons, noneChosen)
+    commonSizeButtons.forEach { sizeButton ->
+        sizeButton.setOnClickListener {
+            tap(sizeButton)
+            t.setText(sizeButton.text)
             t.dismissDropDown()
         }
     }
