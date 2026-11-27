@@ -55,6 +55,22 @@ class RestoreTest {
     }
 
     @Test
+    fun `height, speed accuracy and GPS timing survive the round trip`() {
+        val from = Store(Fixtures.tempDir())
+        val m = Fixtures.storeWithDrive(from)
+        Fixtures.drive(from.driveDir("1700000000000"), extraGpsColumns = ",0.4,87.5")
+        from.saveMeta(m.put("sensorClockLagNs", 3_000_000_000L))
+        val zip = ByteArrayOutputStream().also { Io.export(from, listOf(m), it, true) }.toByteArray()
+        val to = Store(Fixtures.tempDir())
+        Restore.drive(to, ByteArrayInputStream(zip), "https://server")
+        val gps = File(to.driveDir("1700000000000"), "gps.csv").readLines()
+        assertEquals("t_ns,lat,lon,speed_ms,acc_m,bearing,speed_acc_ms,alt_m", gps[0])
+        assertTrue(gps[1].endsWith(",0.4,87.5"), gps[1])
+        assertFalse(to.list().single().has("sensorClockLagNs"), "the restored files are already on one clock")
+        assertEquals(-3.0, Dsp.raw(to.driveDir("1700000000000")).gps[0][0], 1e-3)
+    }
+
+    @Test
     fun `a drive already on the phone is left alone`() {
         val (from, zip) = uploaded()
         val e = assertThrows(IOException::class.java) { Restore.drive(from, ByteArrayInputStream(zip), "x") }

@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.IOException
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
@@ -47,6 +48,50 @@ class IoTest {
         val q = locationRows(export(positions = true))[0].split(",")
         assertEquals(51.5, q[1].toDouble(), 1e-9)
         assertEquals(-0.1, q[2].toDouble(), 1e-9)
+    }
+
+    private fun exportWithSpeedAccuracyAndAltitude(positions: Boolean): List<String> {
+        val st = Store(Fixtures.tempDir())
+        val m = Fixtures.storeWithDrive(st)
+        Fixtures.drive(st.driveDir("1700000000000"), extraGpsColumns = ",0.4,87.5")
+        val out = ByteArrayOutputStream()
+        Io.export(st, listOf(m), out, positions)
+        return locationRows(Fixtures.unzip(out.toByteArray()))[0].split(",")
+    }
+
+    @Test
+    fun `with positions, height and speed accuracy are exported`() {
+        val q = exportWithSpeedAccuracyAndAltitude(positions = true)
+        assertEquals("87.5", q[3])
+        assertEquals("0.4", q[8])
+    }
+
+    @Test
+    fun `without positions, height is left out but speed accuracy stays`() {
+        val q = exportWithSpeedAccuracyAndAltitude(positions = false)
+        assertEquals("NaN", q[3])
+        assertEquals("0.4", q[8])
+    }
+
+    @Test
+    fun `a drive recorded before height and speed accuracy were kept still exports`() {
+        val q = locationRows(export(positions = true))[0].split(",")
+        assertEquals(9, q.size)
+        assertEquals("NaN", q[3])
+        assertEquals("NaN", q[8])
+    }
+
+    @Test
+    fun `exported GPS and mark times allow for the sensor clock lag`() {
+        val st = Store(Fixtures.tempDir())
+        val m = Fixtures.storeWithDrive(st)
+        st.saveMeta(m.put("sensorClockLagNs", 3_000_000_000L))
+        File(st.driveDir("1700000000000"), "marks.csv").writeText("t_ns,label\n${Fixtures.BASE + 30_000_000_000L},Strong\n")
+        val out = ByteArrayOutputStream()
+        Io.export(st, listOf(m), out, true)
+        val z = Fixtures.unzip(out.toByteArray())
+        assertEquals("-3.000", locationRows(z)[0].split(",")[0])
+        assertEquals("27.00,Strong", z.getValue("drives/1700000000000/marks.csv").lines()[1])
     }
 
     @Test

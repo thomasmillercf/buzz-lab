@@ -35,6 +35,7 @@ object Fixtures {
         axis: Int = 1,
         gpsAccuracy: Double = 5.0,
         seed: Long = 1,
+        extraGpsColumns: String = "",
     ) {
         dir.mkdirs()
         val r = Random(seed)
@@ -53,7 +54,7 @@ object Fixtures {
         val ms = mph / Dsp.MPH
         File(dir, "gps.csv").printWriter().use { o ->
             o.println("t_ns,lat,lon,speed_ms,acc_m,bearing")
-            for (s in 0..seconds) o.println("${BASE + s * 1_000_000_000L},${51.5 + s * ms / 111_000.0},-0.1,$ms,$gpsAccuracy,0")
+            for (s in 0..seconds) o.println("${BASE + s * 1_000_000_000L},${51.5 + s * ms / 111_000.0},-0.1,$ms,$gpsAccuracy,0$extraGpsColumns")
         }
     }
 

@@ -23,6 +23,15 @@ class DspTest {
     }
 
     @Test
+    fun `GPS times move onto the sensor's clock by the drive's clock lag`() {
+        val dir = Fixtures.tempDir()
+        Fixtures.drive(dir)
+        assertEquals(0.0, Dsp.raw(dir).gps[0][0], 1e-12)
+        File(dir, "meta.json").writeText("""{"id":"1","sensorClockLagNs":3000000000}""")
+        assertEquals(-3.0, Dsp.raw(dir).gps[0][0], 1e-12)
+    }
+
+    @Test
     fun `speed bins are 5 mph wide and stop at 80`() {
         assertEquals(0, Dsp.bin(0.0))
         assertEquals(0, Dsp.bin(4.99))
