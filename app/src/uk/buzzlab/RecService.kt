@@ -87,6 +87,8 @@ class RecService :
 
     @Volatile private var closed = true
     private var lastFix = 0L
+    private var timing = SampleTiming()
+    private var lastFlushNs = 0L
     private var pauses = 0
     private var acc: DataOutputStream? = null
     private var gps: PrintWriter? = null
@@ -110,6 +112,12 @@ class RecService :
     private var lastMoving = 0L
     private var interval = -1L
     private val carRule = CarRule()
+    private val keepAwake = object : Runnable {
+        override fun run() {
+            wl?.acquire(WAKE_LOCK_MS)
+            h?.postDelayed(this, WAKE_LOCK_MS / 2)
+        }
+    }
     private var carWatch: BroadcastReceiver? = null
 
     override fun onBind(i: Intent?): IBinder? = null
@@ -214,6 +222,8 @@ class RecService :
             pauses = 0
             samples = 0
             fixes = 0
+            timing = SampleTiming()
+            lastFlushNs = 0
             error = null
             auto = byItself
             charts = Live()
@@ -221,16 +231,20 @@ class RecService :
             startMs = System.currentTimeMillis()
             val did = startMs.toString()
             val d = st.driveDir(did).apply { mkdirs() }
+            val accelerometer = sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
             meta = JSONObject().put("id", did).put("start", startMs).put("car", car).put("place", place).put("note", "").put("tyre", tyre)
                 .put("recording", true).put("auto", byItself).put("startedBy", how.ifEmpty { "hand" })
+                .put("phone", "${Build.MANUFACTURER} ${Build.MODEL}").put("android", Build.VERSION.SDK_INT)
+                .put("sensor", accelerometer?.let(::describeSensor))
                 .also { st.saveMeta(it) }
             acc = DataOutputStream(BufferedOutputStream(FileOutputStream(File(d, "acc.bin")), 1 shl 16))
-            gps = PrintWriter(BufferedWriter(FileWriter(File(d, "gps.csv")))).apply { println("t_ns,lat,lon,speed_ms,acc_m,bearing") }
+            gps = PrintWriter(BufferedWriter(FileWriter(File(d, "gps.csv")))).apply { println(Io.GPS_HEADER) }
             marks = PrintWriter(FileWriter(File(d, "marks.csv")), true).apply { println("t_ns,label") }
-            wl = getSystemService(PowerManager::class.java).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "buzzlab:rec").apply { acquire(4 * 3600 * 1000L) }
+            wl = getSystemService(PowerManager::class.java).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "buzzlab:rec").apply { setReferenceCounted(false) }
             closed = false
-            sm.registerListener(this, sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER), 0, 0, h)
+            sm.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_FASTEST, SENSOR_BATCH_US, h)
             live = this
+            keepAwake.run()
             Log.i("BUZZLAB", "REC start $did${if (byItself) " auto" else ""}")
             val t = HandlerThread("live", Process.THREAD_PRIORITY_BACKGROUND).also { it.start() }
             lt = t
@@ -260,13 +274,20 @@ class RecService :
     }
 
     override fun onSensorChanged(e: SensorEvent) {
-        if (closed || paused) return
+        if (closed) return
+        if (paused) {
+            timing.pause()
+            return
+        }
         try {
             val out = acc ?: return
             out.writeLong(e.timestamp)
             for (k in 0..2) out.writeFloat(e.values[k])
             charts.put(e.timestamp, e.values[0], e.values[1], e.values[2])
-            if (++samples % 4740 == 0L) {
+            samples++
+            if (timing.add(e.timestamp, SystemClock.elapsedRealtimeNanos())) saveMeasuredTiming()
+            if (e.timestamp - lastFlushNs >= FLUSH_EVERY_NS) {
+                lastFlushNs = e.timestamp
                 out.flush()
                 gps?.flush()
             }
@@ -274,6 +295,19 @@ class RecService :
             error = "Storage: ${x.message}"
         }
     }
+
+    @Throws(IOException::class)
+    private fun saveMeasuredTiming() {
+        val details = meta ?: return
+        details.put("sampleHz", timing.rateHz).put(Store.SENSOR_CLOCK_LAG, timing.sensorClockLagNs)
+        st.saveMeta(details)
+    }
+
+    private fun describeSensor(sensor: Sensor) = JSONObject()
+        .put("name", sensor.name)
+        .put("vendor", sensor.vendor)
+        .put("resolution", sensor.resolution.toDouble())
+        .put("maxRange", sensor.maximumRange.toDouble())
 
     override fun onAccuracyChanged(s: Sensor?, a: Int) {}
 
@@ -292,7 +326,9 @@ class RecService :
             }
             val speed = if (l.hasSpeed()) l.speed.toString() else ""
             val bearing = if (l.hasBearing()) l.bearing.toString() else ""
-            gps?.println("${l.elapsedRealtimeNanos},${l.latitude},${l.longitude},$speed,${l.accuracy},$bearing")
+            val speedAccuracy = if (l.hasSpeedAccuracy()) l.speedAccuracyMetersPerSecond.toString() else ""
+            val altitude = if (l.hasAltitude()) l.altitude.toString() else ""
+            gps?.println("${l.elapsedRealtimeNanos},${l.latitude},${l.longitude},$speed,${l.accuracy},$bearing,$speedAccuracy,$altitude")
             // While Android Auto is connected, its disconnect ends the drive, so a long wait in traffic doesn't.
             if (auto && !carRule.car) {
                 if (v < STOP_MPH) {
@@ -419,6 +455,7 @@ class RecService :
             } else if (m != null) {
                 m.put("recording", false).put("end", System.currentTimeMillis()).put("pauses", pauses).put("paused_s", pausedNow() / 1000)
                     .put("samples", samples).put("fixes", fixes)
+                    .put("gaps", timing.gaps).put("longestGapMs", timing.longestGapNs / 1_000_000)
                 error?.let { m.put("error", it) }
                 st.saveMeta(m)
             }
@@ -426,6 +463,7 @@ class RecService :
             lastError = e.message.toString()
             Log.e("BUZZLAB", "REC close", e)
         }
+        h?.removeCallbacks(keepAwake)
         wl?.let { if (it.isHeld) it.release() }
         live = null
         paused = false
@@ -467,6 +505,10 @@ class RecService :
         const val START_FIXES = 3
         const val STOP_AFTER_MS = 180_000L
         const val NO_GPS_MS = 300_000L
+        private const val WAKE_LOCK_MS = 2 * 3600 * 1000L
+        private const val FLUSH_EVERY_NS = 1_000_000_000L
+
+        private const val SENSOR_BATCH_US = 200_000
 
         @Volatile @JvmField
         var live: RecService? = null

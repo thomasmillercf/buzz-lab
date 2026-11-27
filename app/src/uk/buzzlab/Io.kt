@@ -19,6 +19,17 @@ import java.util.zip.ZipOutputStream
 /** Export and import. Exports use phyphox's CSV layout, so existing scripts read them. */
 object Io {
     private const val MAX_IMPORT = 400L shl 20
+    const val GPS_HEADER = "t_ns,lat,lon,speed_ms,acc_m,bearing,speed_acc_ms,alt_m"
+
+    /** One gps.csv row from a row of Location.csv, as phyphox or this app's export lays it out. */
+    @JvmStatic fun gpsRow(timeNs: Long, location: List<String>): String {
+        fun valueOrBlank(column: Int) = location.getOrNull(column)?.takeUnless { it == "NaN" }.orEmpty()
+        val speed = valueOrBlank(4)
+        val heading = valueOrBlank(5)
+        val speedAccuracy = valueOrBlank(8)
+        val altitude = valueOrBlank(3)
+        return "$timeNs,${location[1]},${location[2]},$speed,${location[6]},$heading,$speedAccuracy,$altitude"
+    }
 
     private fun ZipOutputStream.text(name: String, s: String) {
         putNextEntry(ZipEntry(name))
@@ -48,19 +59,21 @@ object Io {
                 for (i in raw.t.indices) w.write(String.format(Locale.UK, "%.6f,%.6f,%.6f,%.6f\n", raw.t[i], raw.v[i][0], raw.v[i][1], raw.v[i][2]))
                 w.flush()
                 z.closeEntry()
-                val base = DataInputStream(FileInputStream(File(dir, "acc.bin"))).use { it.readLong() }
-                z.text(p + "Location.csv", location(File(dir, "gps.csv"), base, positions))
+                val firstSampleNs = DataInputStream(FileInputStream(File(dir, "acc.bin"))).use { it.readLong() }
+                val firstSampleOnPhoneClock = firstSampleNs + Store.sensorClockLagNs(dir)
+                z.text(p + "Location.csv", location(File(dir, "gps.csv"), firstSampleOnPhoneClock, positions))
                 val marks = File(dir, "marks.csv")
-                if (marks.exists()) z.text(p + "marks.csv", marks(marks, base))
+                if (marks.exists()) z.text(p + "marks.csv", marks(marks, firstSampleOnPhoneClock))
             }
             z.text("drives.json", index.toString(1))
         }
     }
 
-    /** GPS rows in phyphox's layout. Without positions, latitude, longitude and heading are NaN. */
+    /** GPS rows in phyphox's layout plus speed accuracy. Without positions, latitude, longitude, height and heading are NaN. */
     private fun location(gps: File, base: Long, positions: Boolean) = buildString {
         append(
-            "\"Time (s)\",\"Latitude\",\"Longitude\",\"Height (m)\",\"Velocity (m/s)\",\"Direction\",\"Horizontal Accuracy (m)\",\"Vertical Accuracy (m)\"\n",
+            "\"Time (s)\",\"Latitude\",\"Longitude\",\"Height (m)\",\"Velocity (m/s)\",\"Direction\",\"Horizontal Accuracy (m)\"," +
+                "\"Vertical Accuracy (m)\",\"Speed Accuracy (m/s)\"\n",
         )
         for (line in gps.readLines()) {
             val q = line.split(",")
@@ -68,9 +81,12 @@ object Io {
             append(String.format(Locale.UK, "%.3f", (q[0].toLong() - base) / 1e9))
             append(',').append(if (positions) q[1] else "NaN")
             append(',').append(if (positions) q[2] else "NaN")
-            append(",NaN,").append(q[3].ifEmpty { "NaN" })
+            val speedAccuracy = q.getOrNull(6).orEmpty()
+            val altitude = q.getOrNull(7).orEmpty()
+            append(',').append(if (positions && altitude.isNotEmpty()) altitude else "NaN")
+            append(',').append(q[3].ifEmpty { "NaN" })
             append(',').append(if (positions && q[5].isNotEmpty()) q[5] else "NaN")
-            append(',').append(q[4]).append(",NaN\n")
+            append(',').append(q[4]).append(",NaN,").append(speedAccuracy.ifEmpty { "NaN" }).append('\n')
         }
     }
 
@@ -133,13 +149,11 @@ object Io {
         }
         var fixes = 0
         File(dir, "gps.csv").printWriter().use { o ->
-            o.println("t_ns,lat,lon,speed_ms,acc_m,bearing")
+            o.println(GPS_HEADER)
             for (line in String(loc).lines().drop(1)) {
                 val p = line.split(",")
                 if (p.size < 7) continue
-                val speed = if (p[4] == "NaN") "" else p[4]
-                val heading = if (p[5] == "NaN") "" else p[5]
-                o.println("${(p[0].toDouble() * 1e9).toLong()},${p[1]},${p[2]},$speed,${p[6]},$heading")
+                o.println(gpsRow((p[0].toDouble() * 1e9).toLong(), p))
                 fixes++
             }
         }

@@ -162,6 +162,7 @@ class Dsp {
         const val NF = F1 - F0 + 1
         const val NB = 16
         const val MPH = 2.23694
+        const val MAX_GAP_S = .05
 
         /** Stats layout version; older caches are worked out again when the raw readings are there. */
         const val V = 4
@@ -322,12 +323,13 @@ class Dsp {
                     for (a in 0 until 3) v[i][a] = input.readFloat()
                 }
             }
+            val firstSampleOnPhoneClock = base + Store.sensorClockLagNs(dir)
             val gps = File(dir, "gps.csv").readLines().drop(1).mapNotNull { line ->
                 val p = line.split(",")
                 if (p.size < 5 || p[3].isEmpty()) {
                     null
                 } else {
-                    doubleArrayOf((p[0].toLong() - base) / 1e9, 0.0, 0.0, p[3].toDouble(), p[4].toDouble())
+                    doubleArrayOf((p[0].toLong() - firstSampleOnPhoneClock) / 1e9, 0.0, 0.0, p[3].toDouble(), p[4].toDouble())
                 }
             }.toTypedArray()
             return Raw(t, v, gps)
@@ -433,14 +435,14 @@ class Dsp {
             return if (sqrt(max(0.0, sq / k - mean * mean)) > 2) null else mean
         }
 
-        /** Readings onto an even grid; false if there's a gap over 50 ms. */
+        /** Readings onto an even grid; false if there's a gap over MAX_GAP_S. */
         private fun resample(t: DoubleArray, v: Array<FloatArray>, from: Int, start: Double, fs: Double, x: Array<DoubleArray>): Boolean {
             var j = from
             for (i in x[0].indices) {
                 val u = start + i / fs
                 while (j < t.size - 2 && t[j + 1] < u) j++
                 val h = t[j + 1] - t[j]
-                if (h > .05) return false
+                if (h > MAX_GAP_S) return false
                 val frac = (u - t[j]) / h
                 for (a in 0 until 3) x[a][i] = v[j][a] + (v[j + 1][a] - v[j][a]) * frac
             }

@@ -66,14 +66,12 @@ object Restore {
                         }
                     }
                     "Location.csv" -> File(d, "gps.csv").printWriter().use { o ->
-                        o.println("t_ns,lat,lon,speed_ms,acc_m,bearing")
+                        o.println(Io.GPS_HEADER)
                         lines.readLine()
                         while (true) {
                             val q = (lines.readLine() ?: break).split(",")
                             if (q.size < 7) continue
-                            val speed = if (q[4] == "NaN") "" else q[4]
-                            val heading = if (q[5] == "NaN") "" else q[5]
-                            o.println("${base + (q[0].toDouble() * 1e9).toLong()},${q[1]},${q[2]},$speed,${q[6]},$heading")
+                            o.println(Io.gpsRow(base + (q[0].toDouble() * 1e9).toLong(), q))
                             fixes++
                         }
                     }
@@ -96,6 +94,7 @@ object Restore {
             // its car, if this phone doesn't have it (plates never leave the phone, so there are none here)
             cars?.objects()?.firstOrNull { it.optString("id") == m.optString("car") }?.let { if (st.car(it.optString("id")) == null) st.putCar(it) }
             m.put("recording", false).put("syncedPos", syncedTo).put("samples", samples).put("fixes", fixes).remove("syncErr")
+            m.remove(Store.SENSOR_CLOCK_LAG) // the export's times are already on one clock
             st.saveMeta(m) // last, so a drive half written is never listed
             return m.getString("id")
         } catch (x: Exception) {
