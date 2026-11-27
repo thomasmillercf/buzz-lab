@@ -169,6 +169,14 @@ func TestOldShortStatsMix(t *testing.T) {
 	}
 }
 
+func TestMissingShareIsAPage(t *testing.T) {
+	_, h := mk(t)
+	w := do(h, "GET", "/s/"+strings.Repeat("a", 43), nil, "", "")
+	if w.Code != 404 || w.Header().Get("Content-Type") != "text/html; charset=utf-8" || !strings.Contains(w.Body.String(), "<p>This link doesn&#39;t exist or has expired.</p>") {
+		t.Fatal(w.Code, w.Header().Get("Content-Type"), w.Body.String())
+	}
+}
+
 func TestShares(t *testing.T) {
 	s, h := mk(t)
 	for _, id := range []string{"1700000000000", "1700001000000"} {
