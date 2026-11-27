@@ -287,6 +287,7 @@ class MainActivity : Activity() {
             x.setTextColor(if (on) AC else MU)
             x.compoundDrawableTintList = ColorStateList.valueOf(if (on) AC else MU)
             x.typeface = if (on) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+            x.isSelected = on
             x.background = ripple(ColorDrawable(NAV))
         }
         clear()

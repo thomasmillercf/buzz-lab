@@ -94,6 +94,10 @@ object Charts {
     class Heat(c: Context, @JvmField var d: Dsp, private val circ: Double, @Suppress("unused") dark: Boolean, private val mu: Int) : View(c) {
         @JvmField var log = false
 
+        init {
+            contentDescription = "Chart of vibration strength by speed and frequency"
+        }
+
         override fun onMeasure(w: Int, h: Int) {
             val width = MeasureSpec.getSize(w)
             setMeasuredDimension(width, (width * .85).toInt())
@@ -158,6 +162,10 @@ object Charts {
      */
     @SuppressLint("ViewConstructor")
     class Spread(c: Context, private val a: Dsp, private val b: Dsp?, private val mu: Int) : View(c) {
+        init {
+            contentDescription = "Chart of how much the strength varies at each speed"
+        }
+
         override fun onMeasure(w: Int, h: Int) {
             val width = MeasureSpec.getSize(w)
             setMeasuredDimension(width, (width * .6).toInt())
@@ -234,6 +242,10 @@ object Charts {
         private val mu: Int,
         @JvmField var log: Boolean,
     ) : View(c) {
+        init {
+            contentDescription = "Chart of vibration strength by frequency"
+        }
+
         override fun onMeasure(w: Int, h: Int) {
             val width = MeasureSpec.getSize(w)
             setMeasuredDimension(width, (width * .65).toInt())
@@ -296,6 +308,10 @@ object Charts {
     /** Speed against time for one drive, coloured by speed. */
     @SuppressLint("ViewConstructor")
     class Speed(c: Context, private val t: Trip, private val mu: Int) : View(c) {
+        init {
+            contentDescription = "Chart of speed over the drive"
+        }
+
         override fun onMeasure(w: Int, h: Int) {
             val width = MeasureSpec.getSize(w)
             setMeasuredDimension(width, (width * .45).toInt())
@@ -379,29 +395,19 @@ object Charts {
                 p.color = col
                 g.drawRoundRect(x + bw * .14f, top + h - bh, x + bw * .86f, top + h, 3 * dp, 3 * dp, p)
                 p.color = mu
-                if (i % every == 0) g.drawText(lab[i], x + bw / 2, top + h + 15 * dp, p)
+                if (i % every == 0) drawCentredInside(g, lab[i], x + bw / 2, top + h + 15 * dp, p)
             }
             val k = v.indices.maxByOrNull { v[it] } ?: return
             if (v[k] > 0) {
                 p.color = 0xFFF2F0EA.toInt()
-                g.drawText(
-                    String.format(
-                        Locale.UK,
-                        if (v[k] >=
-                            10
-                        ) {
-                            "%.0f%s"
-                        } else {
-                            "%.1f%s"
-                        },
-                        v[k],
-                        unit,
-                    ),
-                    k * bw + bw / 2,
-                    top + h - (v[k] / m * h).toFloat() - 5 * dp,
-                    p,
-                )
+                val tallest = String.format(Locale.UK, if (v[k] >= 10) "%.0f%s" else "%.1f%s", v[k], unit)
+                drawCentredInside(g, tallest, k * bw + bw / 2, top + h - (v[k] / m * h).toFloat() - 5 * dp, p)
             }
+        }
+
+        private fun drawCentredInside(g: Canvas, s: String, x: Float, y: Float, p: Paint) {
+            val half = p.measureText(s) / 2
+            g.drawText(s, x.coerceIn(half, max(half, width - half)), y, p)
         }
     }
 }

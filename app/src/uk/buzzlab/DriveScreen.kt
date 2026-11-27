@@ -163,13 +163,13 @@ fun MainActivity.stats(d: Dsp, other: Dsp?, otherName: String?, tyre: String, lo
         "Orange: this selection" + (if (q == null) "" else ". Grey: $otherName") + ". Strongest above 15 Hz: ${Dsp.peak(p, 15, 100)} Hz$against" +
             String.format(Locale.UK, ". Along the phone's length at 25 to 35 Hz: %.0f%%.", 100 * d.foreAft(lo, hi)),
     )
-    val s = StringBuilder("Hz        m/s2" + (if (q == null) "" else "   other  ratio") + "\n")
+    val s = StringBuilder("Hz        m/s²" + (if (q == null) "" else "   other  ratio") + "\n")
     for ((a, b) in listOf(2 to 8, 8 to 20, 25 to 35, 38 to 48, 50 to 80, 80 to 120, 120 to 230)) {
         val r = Dsp.rms(p, a, b)
         s.append(String.format(Locale.UK, "%-8s %5.2f", "$a-$b", r))
         if (q != null) {
             val z = Dsp.rms(q, a, b)
-            s.append(String.format(Locale.UK, "   %5.2f  %4.1fx", z, r / z))
+            s.append(String.format(Locale.UK, "   %5.2f  %4.1f×", z, r / z))
         }
         s.append('\n')
     }

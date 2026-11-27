@@ -171,7 +171,6 @@ fun MainActivity.shareOne(m: JSONObject) {
     )
     val d = AlertDialog.Builder(this).setTitle("Share this drive").setView(v).setPositiveButton("Make link", null).setNegativeButton("Cancel", null).create()
     d.show()
-    rounded(d)
     d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener { x ->
         val p = pin.text.toString().trim()
         if (!pinOk(p)) return@setOnClickListener
